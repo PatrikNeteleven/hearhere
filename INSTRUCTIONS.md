@@ -174,6 +174,14 @@ What happens:
 When it's done you'll see something like
 `Processed 42 segment(s) -> C:\Users\you\HearHere\2026-09-13_weekly-sync`.
 
+The mic is captured with **sounddevice** (PortAudio) and the system output with
+**soundcard** (WASAPI loopback). If a device won't open, list the names and pin
+them in `config.toml`:
+
+```powershell
+hearhere devices    # lists input names ([capture].mic_device) and outputs ([capture].output_device)
+```
+
 Handy variants:
 
 ```powershell
@@ -305,14 +313,17 @@ the finished meeting back; exports still happen locally.
   `.venv\Scripts\activate.bat` in Command Prompt.
 - **`hearhere` is not recognized** — the venv isn't active. Run
   `.\.venv\Scripts\Activate.ps1` (you should see `(.venv)` in the prompt).
-- **Recording fails with `Recording the microphone channel failed
-  (AssertionError…)`** — your input device isn't compatible with `soundcard`'s
-  WASAPI shared-mode capture. This is common with pro/USB audio interfaces (e.g.
-  **Focusrite Scarlett**). Fix by using a different input: set a different
-  default microphone in *Windows Settings → System → Sound*, or set
-  `[capture].mic_device` / `output_device` in `config.toml` to another device's
-  name, then re-record. (HearHere now fails immediately with this message instead
-  of silently producing an empty recording.)
+- **`Recording the microphone channel failed…`** — the mic is captured with
+  `sounddevice` (PortAudio), which handles most pro/USB interfaces (e.g.
+  **Focusrite Scarlett**). If it still can't open, run `hearhere devices` to list
+  input names, then set `[capture].mic_device` in `config.toml` to one of them
+  (or change the Windows default mic in *Settings → System → Sound*) and
+  re-record. HearHere fails immediately with this message instead of silently
+  producing an empty recording.
+- **`Recording the system-output (loopback) channel failed (AssertionError…)`** —
+  the *output* device isn't compatible with `soundcard`'s WASAPI loopback. Run
+  `hearhere devices`, set `[capture].output_device` to another playback device
+  (or change the Windows default), and re-record.
 - **`IndexError: index 0 is out of bounds…` / `PermissionError [WinError 32] …
   manifest.json` during transcription** — this used to happen when a channel was
   captured empty (see the item above); the empty channel is now skipped with a

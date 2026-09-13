@@ -211,6 +211,36 @@ def list_meetings(config: Optional[str] = ConfigOpt) -> None:
 
 
 @app.command()
+def devices(config: Optional[str] = ConfigOpt) -> None:
+    """List audio devices for [capture].mic_device / output_device.
+
+    Inputs are listed via sounddevice (the mic backend); system-output devices
+    via soundcard (the loopback backend). Copy a name into config.toml.
+    """
+    typer.echo("Microphone inputs (for [capture].mic_device):")
+    try:
+        import sounddevice as sd  # noqa: PLC0415
+
+        for idx, d in enumerate(sd.query_devices()):
+            if d.get("max_input_channels", 0) > 0:
+                typer.echo(
+                    f"  {d['name']}  "
+                    f"({d['max_input_channels']} ch @ {int(d.get('default_samplerate') or 0)} Hz)"
+                )
+    except Exception as exc:  # noqa: BLE001 - report, don't crash
+        typer.echo(f"  (unavailable: {exc}; install 'hearhere[capture]')", err=True)
+
+    typer.echo("System-output devices (for [capture].output_device):")
+    try:
+        import soundcard as sc  # noqa: PLC0415
+
+        for speaker in sc.all_speakers():
+            typer.echo(f"  {speaker.name}")
+    except Exception as exc:  # noqa: BLE001 - report, don't crash
+        typer.echo(f"  (unavailable: {exc}; install 'hearhere[capture]')", err=True)
+
+
+@app.command()
 def worker(
     host: str = typer.Option("0.0.0.0", help="Bind host."),
     port: int = typer.Option(8808, help="Bind port."),

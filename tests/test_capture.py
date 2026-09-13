@@ -11,7 +11,7 @@ from __future__ import annotations
 import wave
 
 from hearhere.capture.base import CaptureError
-from hearhere.capture.windows import WindowsCapture
+from hearhere.capture.windows import WindowsCapture, _mic_stream_params
 from hearhere.engines.asr.parakeet_nemo import (
     ParakeetNeMoEngine,
     _wav_duration_seconds,
@@ -72,3 +72,29 @@ def test_capture_error_generic_for_other_failures(tmp_path):
     msg = str(cap._capture_error())
     assert "system-output" in msg
     assert "device busy" in msg
+
+
+# --- mic stream parameter selection (sounddevice) --------------------------
+
+
+def test_mic_stream_params_uses_native_rate_and_channels():
+    rate, channels = _mic_stream_params(
+        {"default_samplerate": 48000.0, "max_input_channels": 2}
+    )
+    assert rate == 48000
+    assert channels == 2
+
+
+def test_mic_stream_params_caps_channels_and_falls_back_on_rate():
+    # 18-input console -> capped to 2; missing/zero rate -> 16 kHz fallback.
+    rate, channels = _mic_stream_params(
+        {"default_samplerate": 0, "max_input_channels": 18}
+    )
+    assert rate == 16000
+    assert channels == 2
+
+
+def test_mic_stream_params_defaults_for_empty_info():
+    rate, channels = _mic_stream_params({})
+    assert rate == 16000
+    assert channels == 1
