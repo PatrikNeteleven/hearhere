@@ -91,8 +91,25 @@ class PyannoteDiarizer:
         if max_speakers:
             kwargs["max_speakers"] = max_speakers
 
-        annotation = self._pipeline(str(wav_path), **kwargs)
+        annotation = self._pipeline(self._load_waveform(wav_path), **kwargs)
         return self._to_turns(annotation)
+
+    @staticmethod
+    def _load_waveform(wav_path: str) -> dict[str, Any]:
+        """Decode ``wav_path`` in-memory for pyannote.
+
+        Passing a pre-loaded waveform (rather than a path) keeps pyannote 4.x
+        from routing decoding through ``torchcodec``/FFmpeg, which is awkward to
+        install on Windows. ``soundfile`` (libsndfile) reads WAV natively and is
+        already a dependency.
+        """
+        import soundfile as sf  # noqa: PLC0415
+        import torch  # noqa: PLC0415
+
+        data, sample_rate = sf.read(str(wav_path), dtype="float32", always_2d=True)
+        # soundfile yields (frames, channels); pyannote wants (channels, frames).
+        waveform = torch.from_numpy(data).transpose(0, 1).contiguous()
+        return {"waveform": waveform, "sample_rate": int(sample_rate)}
 
     # -- conversion ------------------------------------------------------
 
