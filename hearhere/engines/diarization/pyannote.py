@@ -91,8 +91,8 @@ class PyannoteDiarizer:
         if max_speakers:
             kwargs["max_speakers"] = max_speakers
 
-        annotation = self._pipeline(self._load_waveform(wav_path), **kwargs)
-        return self._to_turns(annotation)
+        result = self._pipeline(self._load_waveform(wav_path), **kwargs)
+        return self._to_turns(self._as_annotation(result))
 
     @staticmethod
     def _load_waveform(wav_path: str) -> dict[str, Any]:
@@ -112,6 +112,32 @@ class PyannoteDiarizer:
         return {"waveform": waveform, "sample_rate": int(sample_rate)}
 
     # -- conversion ------------------------------------------------------
+
+    @staticmethod
+    def _as_annotation(result: Any) -> Any:
+        """Extract a pyannote ``Annotation`` from a pipeline result.
+
+        pyannote 3.x returns the ``Annotation`` directly; pyannote 4.x wraps it
+        in a ``DiarizeOutput`` where the annotation is one of the fields. Locate
+        whichever object exposes ``itertracks`` rather than hardcoding a name.
+        """
+        if hasattr(result, "itertracks"):
+            return result
+        for name in ("speaker_diarization", "diarization", "annotation"):
+            candidate = getattr(result, name, None)
+            if candidate is not None and hasattr(candidate, "itertracks"):
+                return candidate
+        # NamedTuple / iterable fallback: scan the fields.
+        try:
+            members = list(result)
+        except TypeError:
+            members = []
+        for candidate in members:
+            if hasattr(candidate, "itertracks"):
+                return candidate
+        raise TypeError(
+            f"Cannot find a diarization Annotation in {type(result).__name__}"
+        )
 
     @staticmethod
     def _to_turns(annotation: Any) -> list[SpeakerTurn]:
