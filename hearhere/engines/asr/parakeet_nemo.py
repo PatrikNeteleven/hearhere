@@ -12,6 +12,9 @@ never imports them; the model is loaded on first :meth:`transcribe` (or via
 
 from __future__ import annotations
 
+import contextlib
+import wave
+from pathlib import Path
 from typing import Any
 
 from ...logging_setup import get_logger
@@ -20,6 +23,22 @@ from ...models import Segment, Word
 log = get_logger("asr.parakeet")
 
 DEFAULT_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
+
+# Below this, the clip is effectively empty; NeMo's preprocessor crashes on
+# zero-length input, so we skip it and return no segments instead.
+_MIN_DURATION_S = 0.1
+
+
+def _wav_duration_seconds(wav_path: str) -> float | None:
+    """Duration of a WAV via the stdlib (no torch/soundfile); ``None`` if unreadable."""
+    path = Path(wav_path)
+    if not path.is_file():
+        return 0.0
+    with contextlib.suppress(Exception):
+        with wave.open(str(path), "rb") as wf:
+            rate = wf.getframerate()
+            return wf.getnframes() / rate if rate else 0.0
+    return None  # unknown format — let the model try
 
 
 class ParakeetNeMoEngine:
@@ -55,6 +74,14 @@ class ParakeetNeMoEngine:
 
     def transcribe(self, wav_path: str, language: str | None = None) -> list[Segment]:
         """Transcribe ``wav_path`` into time-stamped segments."""
+        duration = _wav_duration_seconds(wav_path)
+        if duration is not None and duration < _MIN_DURATION_S:
+            log.warning(
+                "Skipping %s: no usable audio (%.2fs). Was this channel captured?",
+                wav_path,
+                duration,
+            )
+            return []
         self.load()
         want_words = self.timestamps in ("word", "char")
         results = self._model.transcribe(

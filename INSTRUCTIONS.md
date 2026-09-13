@@ -305,6 +305,25 @@ the finished meeting back; exports still happen locally.
   `.venv\Scripts\activate.bat` in Command Prompt.
 - **`hearhere` is not recognized** — the venv isn't active. Run
   `.\.venv\Scripts\Activate.ps1` (you should see `(.venv)` in the prompt).
+- **Recording fails with `Recording the microphone channel failed
+  (AssertionError…)`** — your input device isn't compatible with `soundcard`'s
+  WASAPI shared-mode capture. This is common with pro/USB audio interfaces (e.g.
+  **Focusrite Scarlett**). Fix by using a different input: set a different
+  default microphone in *Windows Settings → System → Sound*, or set
+  `[capture].mic_device` / `output_device` in `config.toml` to another device's
+  name, then re-record. (HearHere now fails immediately with this message instead
+  of silently producing an empty recording.)
+- **`IndexError: index 0 is out of bounds…` / `PermissionError [WinError 32] …
+  manifest.json` during transcription** — this used to happen when a channel was
+  captured empty (see the item above); the empty channel is now skipped with a
+  warning instead of crashing NeMo. If you still see it, the WAV under `audio/`
+  has no audio — re-record after fixing the device.
+- **Transcription ran on CPU / `CUDA is not available`** — the default PyTorch is
+  CPU-only. On an NVIDIA machine, install a CUDA build of torch (Step 4's GPU
+  note) for a large speed-up.
+- **`UserWarning: … does not support symlinks` (Hugging Face cache)** — harmless;
+  the model still downloads. To silence it, enable Windows *Developer Mode*
+  (Settings → Privacy & security → For developers) so the cache can use symlinks.
 - **`'record' is not implemented` on macOS/Linux** — expected; recording is
   Windows-only for now (Batches 3/4 add the rest).
 - **`The web UI needs the '[webui]' extra`** — run `pip install ".[webui]"`.

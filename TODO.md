@@ -97,7 +97,8 @@ Legend: 🎯 milestone · ⛓️ depends on the batch above · 🧪 has an expli
 ## Cross-cutting (do alongside, not a blocking batch)
 
 - [ ] Tests per batch (unit for merge/align/config/export; smoke tests for capture where feasible).
-- [ ] Error handling: missing devices, no model, no GPU, Ollama/pyannote unavailable.
+- [ ] Error handling: missing devices, no model, no GPU, Ollama/pyannote unavailable. *(Partly done: capture now fails loudly with an actionable `CaptureError` when a channel's recorder crashes, and ASR skips empty/near-silent WAVs instead of crashing NeMo — found on real Windows hardware 2026-09-13.)*
+- [ ] **Robust Windows capture backend.** `soundcard`'s WASAPI shared-mode capture asserts on some devices' mix format (`wFormatTag == 0xFFFE`) and fails on pro/USB interfaces like the Focusrite Scarlett (hit on real hardware 2026-09-13). Options to make capture actually work on such devices: (a) a `sounddevice`/PortAudio path for the mic (already a `[capture]` dep) with soundcard used only for loopback; (b) record at the device's native sample rate and downmix/resample ourselves (we already resample on write); (c) `hearhere devices` command to list/select input & output devices by name for `[capture].mic_device`/`output_device`; (d) upgrade/patch soundcard or catch its assertion per-device. Needs a real Windows box to verify.
 - [ ] Choose & add HearHere's own license file (README marks it TBD).
 - [ ] CI: lint + tests on push.
 - [ ] Packaging/distribution story per OS (later).

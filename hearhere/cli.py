@@ -75,10 +75,12 @@ def record(
     """Record mic + system output until stopped, then run the pipeline."""
     from hearhere.pipeline.orchestrator import process_meeting, record_meeting
 
+    from hearhere.capture.base import CaptureError
+
     cfg = load_config(config)
     try:
         paths = record_meeting(cfg, title)
-    except NotImplementedError as exc:
+    except (NotImplementedError, CaptureError) as exc:
         raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
     typer.echo(f"Recorded meeting: {paths.root}")
     if no_process:

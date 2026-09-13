@@ -29,6 +29,15 @@ log = get_logger("capture")
 TARGET_SAMPLE_RATE = 16000
 
 
+class CaptureError(RuntimeError):
+    """Recording failed (device unavailable, incompatible format, …).
+
+    Raised loudly so the caller never mistakes a failed capture for a silent
+    meeting — an empty WAV would otherwise crash the ASR stage with a cryptic
+    error much later.
+    """
+
+
 @dataclass(frozen=True)
 class CaptureResult:
     """Outcome of a completed recording."""
