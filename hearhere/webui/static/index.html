@@ -188,11 +188,15 @@ function summaryCard(s) {
 function speakersCard(m) {
   const c = el("div", "card");
   c.appendChild(el("h3", null, "Speakers — rename inline"));
+  // Every speaker is renameable, including "Me". If diarization didn't label the
+  // others, they share one "Unknown" bucket you can name in one go.
+  const names = [...m.speakers];
+  const hasUnlabeled = m.transcript.segments.some(s => !s.speaker);
+  if (hasUnlabeled && !names.includes("Unknown")) names.push("Unknown");
   const inputs = {};
-  for (const name of m.speakers) {
-    if (name === "Me") continue; // the local user's own channel is fixed
+  for (const name of names) {
     const row = el("div", "row");
-    row.appendChild(el("label", null, name));
+    row.appendChild(el("label", null, name === "Unknown" ? "Unknown (others)" : name));
     const input = el("input");
     input.type = "text"; input.value = name; input.placeholder = name;
     inputs[name] = input;
@@ -200,7 +204,7 @@ function speakersCard(m) {
     c.appendChild(row);
   }
   if (!Object.keys(inputs).length) {
-    c.appendChild(el("div", "meta", "No renameable speakers."));
+    c.appendChild(el("div", "meta", "No speakers to rename."));
     return c;
   }
   const btn = el("button", null, "Save names");
@@ -281,8 +285,9 @@ function transcriptCard(m) {
   for (const seg of m.transcript.segments) {
     const row = el("div", "seg");
     row.appendChild(el("div", "time", fmtTime(seg.start)));
-    const who = el("div", "who " + (seg.speaker === "Me" ? "me" : "other"),
-      seg.speaker || "—");
+    const isMe = seg.channel === "self" || seg.speaker === "Me";
+    const who = el("div", "who " + (isMe ? "me" : "other"),
+      seg.speaker || "Unknown");
     row.appendChild(who);
     row.appendChild(el("div", "txt", seg.text));
     c.appendChild(row);

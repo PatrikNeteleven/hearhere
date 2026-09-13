@@ -13,6 +13,7 @@ never imports them; the model is loaded on first :meth:`transcribe` (or via
 from __future__ import annotations
 
 import contextlib
+import inspect
 import tempfile
 import wave
 from pathlib import Path
@@ -41,6 +42,11 @@ _CHUNK_OVERLAP_SECONDS = 6.0
 # Two segments overlapping more than this fraction of the shorter one are treated
 # as the same utterance seen in two chunks.
 _DUP_OVERLAP_RATIO = 0.5
+
+# NeMo names the language hint differently across model families/versions; we pass
+# it under the first name the model's ``transcribe`` actually accepts, or not at
+# all (relying on auto-detection). Ordered most- to least-specific.
+_LANGUAGE_KWARGS = ("source_lang", "langs", "lang", "language")
 
 
 def _offset_segment(seg: Segment, dt: float) -> Segment:
@@ -154,10 +160,13 @@ class ParakeetNeMoEngine:
             return []
         self.load()
         want_words = self.timestamps in ("word", "char")
+        extra = self._language_kwargs(language)
         if duration is not None and duration > _CHUNK_SECONDS:
-            segments = self._transcribe_chunked(str(wav_path), duration, want_words=want_words)
+            segments = self._transcribe_chunked(
+                str(wav_path), duration, want_words=want_words, extra=extra
+            )
         else:
-            segments = self._transcribe_file(str(wav_path), want_words=want_words)
+            segments = self._transcribe_file(str(wav_path), want_words=want_words, extra=extra)
 
         # Coverage check: if transcription ends well before the audio does, the
         # tail was dropped — surfaces any remaining truncation in the log.
@@ -175,17 +184,49 @@ class ParakeetNeMoEngine:
             )
         return segments
 
+    # -- language hint ---------------------------------------------------
+
+    def _language_kwargs(self, language: str | None) -> dict[str, str]:
+        """Pick the ``transcribe`` kwarg this model uses for a language hint.
+
+        ``parakeet-tdt-0.6b-v3`` auto-detects language per call, which can flip
+        mid-clip; when the config pins a language we forward it under whichever
+        kwarg the installed NeMo ``transcribe`` accepts. If none matches we log
+        and fall back to auto-detection rather than error.
+        """
+        if not language or language == "auto":
+            return {}
+        try:
+            params = inspect.signature(self._model.transcribe).parameters
+        except (TypeError, ValueError):  # pragma: no cover - builtins w/o signature
+            params = {}
+        for name in _LANGUAGE_KWARGS:
+            if name in params:
+                log.info("Forcing ASR language %r via transcribe(%s=...)", language, name)
+                return {name: language}
+        log.warning(
+            "ASR model %s exposes no language kwarg; can't force %r — relying on "
+            "auto-detection (it may switch language mid-clip).",
+            self.model_name, language,
+        )
+        return {}
+
     # -- transcription backends ------------------------------------------
 
-    def _transcribe_file(self, wav_path: str, *, want_words: bool) -> list[Segment]:
+    def _transcribe_file(
+        self, wav_path: str, *, want_words: bool, extra: dict[str, str] | None = None
+    ) -> list[Segment]:
         """Single-shot transcription of a whole WAV file."""
-        results = self._model.transcribe([wav_path], timestamps=True, verbose=False)
+        results = self._model.transcribe(
+            [wav_path], timestamps=True, verbose=False, **(extra or {})
+        )
         if not results:
             return []
         return self._to_segments(results[0], want_words=want_words)
 
     def _transcribe_chunked(
-        self, wav_path: str, duration: float, *, want_words: bool
+        self, wav_path: str, duration: float, *, want_words: bool,
+        extra: dict[str, str] | None = None,
     ) -> list[Segment]:
         """Transcribe long audio in overlapping windows and stitch the timeline."""
         import soundfile as sf  # noqa: PLC0415
@@ -202,12 +243,15 @@ class ParakeetNeMoEngine:
         collected: list[Segment] = []
         for start, end in windows:
             samples = audio[int(start * sr):int(end * sr)]
-            for seg in self._transcribe_samples(samples, sr, want_words=want_words):
+            for seg in self._transcribe_samples(
+                samples, sr, want_words=want_words, extra=extra
+            ):
                 collected.append(_offset_segment(seg, start))
         return _dedup_segments(collected)
 
     def _transcribe_samples(
-        self, samples: Any, sr: int, *, want_words: bool
+        self, samples: Any, sr: int, *, want_words: bool,
+        extra: dict[str, str] | None = None,
     ) -> list[Segment]:
         """Transcribe an in-memory chunk via a temp WAV (path input is best-tested)."""
         import soundfile as sf  # noqa: PLC0415
@@ -216,7 +260,7 @@ class ParakeetNeMoEngine:
             tmp = fh.name
         try:
             sf.write(tmp, samples, sr, subtype="PCM_16")
-            return self._transcribe_file(tmp, want_words=want_words)
+            return self._transcribe_file(tmp, want_words=want_words, extra=extra)
         finally:
             Path(tmp).unlink(missing_ok=True)
 

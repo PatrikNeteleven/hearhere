@@ -20,6 +20,7 @@ def test_defaults_are_valid():
     assert cfg.capture.sample_rate == 16000
     assert cfg.asr.model == "nvidia/parakeet-tdt-0.6b-v3"
     assert cfg.diarization.enabled is True
+    assert cfg.llm.enabled is False  # summarization is opt-in; base run transcribes only
     assert cfg.llm.tasks == ["summary", "action_items", "decisions"]
     assert cfg.export.formats == ["markdown", "json", "srt"]
 

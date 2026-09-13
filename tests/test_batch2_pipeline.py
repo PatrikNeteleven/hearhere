@@ -127,3 +127,48 @@ def test_rename_unknown_speaker_is_noop(tmp_path):
                     summarizer=FakeSummarizer(), title="Weekly Sync")
     updated = rename_speakers(paths.root, cfg, {"Nonexistent": "X"})
     assert updated.speakers == ["Me", "Speaker 1", "Speaker 2"]
+
+
+def test_rename_me_channel(tmp_path):
+    paths = _recorded(tmp_path)
+    cfg = _config()
+    process_meeting(paths.root, cfg, asr=FakeASR(), diarizer=FakeDiarizer(),
+                    summarizer=FakeSummarizer(), title="Weekly Sync")
+
+    updated = rename_speakers(paths.root, cfg, {"Me": "Julian"})
+
+    assert "Julian" in updated.speakers and "Me" not in updated.speakers
+    reloaded = artifacts.read_meeting(paths)
+    self_segs = [s for s in reloaded.transcript.segments if s.channel == "self"]
+    assert self_segs and all(s.speaker == "Julian" for s in self_segs)
+    assert "Julian:" in paths.export("transcript.md").read_text(encoding="utf-8")
+
+
+def test_rename_unlabeled_others_bucket(tmp_path):
+    # Diarization off -> every remote voice is one unlabeled ("Unknown") bucket;
+    # the "Unknown" key names them all at once.
+    paths = _recorded(tmp_path)
+    cfg = Config.model_validate(
+        {"diarization": {"enabled": False}, "llm": {"enabled": False},
+         "export": {"formats": ["markdown"]}}
+    )
+    meeting = process_meeting(paths.root, cfg, asr=FakeASR())
+    assert meeting.speakers == ["Me"]  # others are unlabeled
+    assert any(s.speaker is None for s in meeting.transcript.segments)
+
+    updated = rename_speakers(paths.root, cfg, {"Unknown": "Guest"})
+
+    assert updated.speakers == ["Me", "Guest"]
+    others = [s for s in updated.transcript.segments if s.channel == "others"]
+    assert others and all(s.speaker == "Guest" for s in others)
+    assert "Guest:" in paths.export("transcript.md").read_text(encoding="utf-8")
+
+
+def test_rename_unknown_bucket_noop_when_all_labeled(tmp_path):
+    # With everyone diarized there is no unlabeled bucket, so "Unknown" does nothing.
+    paths = _recorded(tmp_path)
+    cfg = _config()
+    process_meeting(paths.root, cfg, asr=FakeASR(), diarizer=FakeDiarizer(),
+                    summarizer=FakeSummarizer(), title="Weekly Sync")
+    updated = rename_speakers(paths.root, cfg, {"Unknown": "Guest"})
+    assert updated.speakers == ["Me", "Speaker 1", "Speaker 2"]

@@ -25,7 +25,7 @@ from ..logging_setup import (
     get_logger,
     remove_meeting_file_handler,
 )
-from ..models import Meeting, Summary
+from ..models import UNLABELED_SPEAKER, Meeting, Summary
 from . import artifacts
 from .artifacts import MeetingPaths
 from .merge import assign_speakers, merge_segments
@@ -264,10 +264,13 @@ def rename_speakers(
     """Rename speakers in a processed meeting and re-export.
 
     ``mapping`` maps current labels to new names, e.g.
-    ``{"Speaker 1": "Anna"}``. The change is applied to ``meeting.json``
-    (speaker list, transcript segments, and any summary text) and all exports
-    are regenerated. Unknown labels in ``mapping`` are ignored. The models are
-    never re-run.
+    ``{"Speaker 1": "Anna"}``. ``"Me"`` (the mic channel) can be renamed too. The
+    special key ``"Unknown"`` names the not-yet-diarized ``others`` segments as a
+    single speaker — useful when diarization didn't run and every remote voice
+    sits in one bucket. The change is applied to ``meeting.json`` (speaker list,
+    transcript segments, and any summary text) and all exports are regenerated.
+    Labels in ``mapping`` that match nothing are ignored. The models are never
+    re-run.
     """
     paths = artifacts.resolve_meeting(meeting_dir)
     meeting = artifacts.read_meeting(paths)
@@ -292,24 +295,41 @@ def rename_speakers(
 
 
 def _apply_renames(meeting: Meeting, mapping: dict[str, str]) -> dict[str, str]:
-    """Apply ``mapping`` in place; return the subset actually present."""
-    present = {old for seg in meeting.transcript.segments if seg.speaker for old in [seg.speaker]}
-    present.update(meeting.speakers)
+    """Apply ``mapping`` in place; return the subset actually applied."""
+    present = {seg.speaker for seg in meeting.transcript.segments if seg.speaker}
+    present.update(s for s in meeting.speakers if s)
     applied = {old: new for old, new in mapping.items() if old in present}
-    if not applied:
+
+    # Special case: name the unlabeled ("Unknown") others bucket as one speaker.
+    # Only when there is no real speaker literally called "Unknown" to shadow.
+    unlabeled_target = mapping.get(UNLABELED_SPEAKER, "").strip()
+    name_unlabeled = bool(
+        unlabeled_target
+        and UNLABELED_SPEAKER not in present
+        and any(seg.speaker is None for seg in meeting.transcript.segments)
+    )
+    if not applied and not name_unlabeled:
         return {}
 
-    meeting.speakers = [applied.get(s, s) for s in meeting.speakers]
     for seg in meeting.transcript.segments:
         if seg.speaker in applied:
             seg.speaker = applied[seg.speaker]
+        elif name_unlabeled and seg.speaker is None:
+            seg.speaker = unlabeled_target
+    # Rebuild the roster from the (now-renamed) transcript — the source of truth.
+    meeting.speakers = meeting.transcript.speakers()
 
-    if meeting.summary is not None:
+    # Only rewrite real speaker labels in the summary prose — never the literal
+    # word "Unknown", which can appear in a summary meaning something else.
+    if meeting.summary is not None and applied:
         meeting.summary.summary = _replace_all(meeting.summary.summary, applied)
         meeting.summary.decisions = [_replace_all(d, applied) for d in meeting.summary.decisions]
         meeting.summary.action_items = [
             _replace_all(a, applied) for a in meeting.summary.action_items
         ]
+
+    if name_unlabeled:
+        applied = {**applied, UNLABELED_SPEAKER: unlabeled_target}
     return applied
 
 

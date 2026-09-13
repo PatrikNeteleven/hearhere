@@ -11,6 +11,7 @@ from __future__ import annotations
 from hearhere.engines.asr.parakeet_nemo import (
     _CHUNK_OVERLAP_SECONDS,
     _CHUNK_SECONDS,
+    ParakeetNeMoEngine,
     _chunk_windows,
     _dedup_segments,
     _offset_segment,
@@ -91,6 +92,52 @@ def test_no_gap_across_a_seam():
 
 
 # --- timestamp offsetting --------------------------------------------------
+
+
+# --- language hint selection (parakeet auto-detect can flip mid-clip) ------
+
+
+class _FakeModel:
+    """Stand-in NeMo model whose transcribe signature we control."""
+
+    def __init__(self, kwarg_name=None):
+        if kwarg_name is None:
+            def transcribe(paths, timestamps=True, verbose=False):
+                return []
+        else:
+            def transcribe(paths, timestamps=True, verbose=False, **_):
+                return []
+            transcribe.__signature__ = __import__("inspect").Signature(
+                parameters=[
+                    __import__("inspect").Parameter(
+                        p, __import__("inspect").Parameter.POSITIONAL_OR_KEYWORD
+                    )
+                    for p in ("paths", "timestamps", "verbose", kwarg_name)
+                ]
+            )
+        self.transcribe = transcribe
+
+
+def _engine_with(kwarg_name):
+    eng = ParakeetNeMoEngine()
+    eng._model = _FakeModel(kwarg_name)
+    return eng
+
+
+def test_language_kwargs_empty_for_auto():
+    eng = _engine_with("source_lang")
+    assert eng._language_kwargs(None) == {}
+    assert eng._language_kwargs("auto") == {}
+
+
+def test_language_kwargs_uses_supported_name():
+    assert _engine_with("source_lang")._language_kwargs("de") == {"source_lang": "de"}
+    assert _engine_with("language")._language_kwargs("de") == {"language": "de"}
+
+
+def test_language_kwargs_falls_back_when_unsupported():
+    # A transcribe that accepts no language kwarg -> auto-detection (empty dict).
+    assert _engine_with(None)._language_kwargs("de") == {}
 
 
 def test_offset_segment_shifts_segment_and_words():

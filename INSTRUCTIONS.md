@@ -127,7 +127,9 @@ model is license-gated:
 
    (Or put it in `config.toml` under `[diarization].hf_token` — see Step 6.)
 
-**Summaries** need [Ollama](https://ollama.com) running locally:
+**Summaries are off by default** — the base pipeline only transcribes. To also
+get a summary / decisions / action items, install [Ollama](https://ollama.com)
+and turn the LLM on:
 
 1. Download and install Ollama for Windows from [ollama.com](https://ollama.com).
    It runs in the background after install.
@@ -136,6 +138,8 @@ model is license-gated:
    ```powershell
    ollama pull llama3.1
    ```
+
+3. Enable it in `config.toml` (Step 6) with `[llm]` → `enabled = true`.
 
 ### Step 6 — (Optional) create a config file
 
@@ -167,9 +171,18 @@ What happens:
   so **no virtual cable is needed**.
 - The terminal prints `Recording… press Enter to stop.` — leave it running for
   the meeting, then press **Enter**.
-- It then transcribes both channels, separates speakers, and writes a summary.
-  **The very first run also downloads the Parakeet model (~2 GB)** from Hugging
-  Face, so give it time and keep the network on.
+- It then transcribes both channels and separates speakers (a summary is written
+  too only if you enabled the LLM in Step 5). **The very first run also downloads
+  the Parakeet model (~2 GB)** from Hugging Face, so give it time and keep the
+  network on.
+
+**Force a language for accuracy.** Parakeet auto-detects the language and can
+switch mid-clip (e.g. flip a German sentence to English). Pin it with `--language`
+(or `[general].language` in `config.toml`):
+
+```powershell
+hearhere record --title "Weekly Sync" --language de   # de, en, … or "auto"
+```
 
 When it's done you'll see something like
 `Processed 42 segment(s) -> C:\Users\you\HearHere\2026-09-13_weekly-sync`.
@@ -207,10 +220,17 @@ hearhere ui
 ```
 
 Open <http://127.0.0.1:8809> in your browser. You can browse every past meeting,
-read the transcript and summary, **rename speakers inline** (e.g. "Speaker 1" →
-"Anna" — it rewrites `meeting.json` and re-exports automatically), and
-**re-export** to other formats. Nothing is uploaded; it only reads what's already
-on your disk. Press **Ctrl+C** in PowerShell to stop the server.
+read the transcript and summary, **rename speakers inline**, and **re-export** to
+other formats. Renaming rewrites `meeting.json` and re-exports automatically. You
+can rename:
+
+- **"Me"** — your own mic channel (e.g. → "Julian").
+- **Each "Speaker N"** — when diarization labeled the others.
+- **"Unknown"** — when diarization didn't run, every remote voice sits in one
+  "Unknown" bucket; give it a name to label all of it at once.
+
+Nothing is uploaded; it only reads what's already on your disk. Press **Ctrl+C**
+in PowerShell to stop the server.
 
 ### Step 10 — Re-export to other formats anytime (optional)
 
@@ -340,7 +360,10 @@ the finished meeting back; exports still happen locally.
 - **`The web UI needs the '[webui]' extra`** — run `pip install ".[webui]"`.
 - **Diarization is skipped** — set a Hugging Face token (`HF_TOKEN`) and accept
   the pyannote model license; the pipeline fails soft and continues unlabeled.
-- **No summary** — make sure Ollama is installed and running and the model is
-  pulled (`ollama pull llama3.1`); summaries are skipped if it's unavailable.
+- **No summary** — summaries are **off by default**. Set `[llm].enabled = true`
+  in `config.toml`, install/run Ollama, and pull the model (`ollama pull llama3.1`).
+  If the LLM is unavailable at run time the summary is skipped (fails soft).
+- **Transcript switches language** — pin it with `--language de` (or set
+  `[general].language`); auto-detection can flip mid-clip.
 - **Slow transcription** — Parakeet runs on CPU but is much faster on a CUDA
   GPU; set `[compute].device = "cuda"` or leave it on `auto`.

@@ -92,7 +92,9 @@ class DiarizationConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    enabled: bool = True
+    # Off by default: the base pipeline transcribes only. Turn this on (and run
+    # Ollama) to also get a summary / action items / decisions.
+    enabled: bool = False
     engine: Literal["ollama", "llamacpp"] = "ollama"
     model: str = "llama3.1"
     tasks: list[LLMTask] = Field(

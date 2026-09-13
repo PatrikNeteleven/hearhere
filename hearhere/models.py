@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 # The label used for the local user's own (mic) channel.
 SELF_SPEAKER = "Me"
 
+# Display label for others-channel segments with no diarized speaker yet. Exports
+# render ``speaker or UNLABELED_SPEAKER``; the web UI lets you rename this bucket.
+UNLABELED_SPEAKER = "Unknown"
+
 SCHEMA_VERSION = 1
 
 

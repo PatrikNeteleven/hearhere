@@ -31,6 +31,20 @@ ConfigOpt = typer.Option(
     None, "--config", "-c", help="Path to config.toml (default: search cwd then ~/.config/hearhere)."
 )
 
+# --language overrides [general].language for one run. Pin it (e.g. "de") when the
+# model keeps switching language mid-clip; "auto" restores auto-detection.
+LanguageOpt = typer.Option(
+    None, "--language", "-l",
+    help='Force the transcription language, e.g. "de" or "en" ("auto" to detect).',
+)
+
+
+def _with_language(cfg, language: Optional[str]):
+    """Return ``cfg`` with ``[general].language`` overridden, if given."""
+    if language:
+        cfg.general.language = language
+    return cfg
+
 
 def _version_callback(value: bool) -> None:
     if value:
@@ -67,6 +81,7 @@ def record(
     no_process: bool = typer.Option(
         False, "--no-process", help="Record only; skip the transcribe step."
     ),
+    language: Optional[str] = LanguageOpt,
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip the remote-upload confirmation prompt."
     ),
@@ -77,7 +92,7 @@ def record(
 
     from hearhere.capture.base import CaptureError
 
-    cfg = load_config(config)
+    cfg = _with_language(load_config(config), language)
     try:
         paths = record_meeting(cfg, title)
     except (NotImplementedError, CaptureError) as exc:
@@ -101,6 +116,7 @@ def record(
 @app.command()
 def process(
     meeting_dir: Path = typer.Argument(..., help="Path to a recorded meeting folder."),
+    language: Optional[str] = LanguageOpt,
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip the remote-upload confirmation prompt."
     ),
@@ -109,7 +125,7 @@ def process(
     """Run the pipeline on an already-recorded meeting folder."""
     from hearhere.pipeline.orchestrator import process_meeting
 
-    cfg = load_config(config)
+    cfg = _with_language(load_config(config), language)
     _ensure_remote_consent(cfg, assume_yes=yes)
     try:
         meeting = process_meeting(meeting_dir, cfg)
