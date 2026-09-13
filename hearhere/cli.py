@@ -1,0 +1,280 @@
+"""HearHere command-line interface.
+
+``record``/``process``/``export``/``list`` run the core pipeline (Batch 1);
+``speakers`` renames diarized speakers (Batch 2); ``worker`` serves the remote
+backend and ``record``/``process`` can offload to it (Batch 5); ``ui`` serves
+the local web UI for reviewing past meetings in the browser (Batch 7).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+import typer
+
+from hearhere import __version__
+from hearhere.config import load_config
+from hearhere.logging_setup import get_logger, setup_logging
+from hearhere.pipeline import artifacts
+
+app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="HearHere — hear what was said, right here on your machine.",
+)
+
+log = get_logger("cli")
+
+# A single --config option reused across commands.
+ConfigOpt = typer.Option(
+    None, "--config", "-c", help="Path to config.toml (default: search cwd then ~/.config/hearhere)."
+)
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"hearhere {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False, "--version", "-V", callback=_version_callback, is_eager=True,
+        help="Show version and exit.",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+) -> None:
+    """Global options."""
+    setup_logging("DEBUG" if verbose else "INFO")
+
+
+def _todo(feature: str, batch: str) -> None:
+    raise typer.Exit(
+        typer.echo(  # type: ignore[func-returns-value]
+            f"'{feature}' is not implemented yet (arrives in {batch}). "
+            "See TODO.md for the roadmap.",
+            err=True,
+        )
+        or 1
+    )
+
+
+@app.command()
+def record(
+    title: str = typer.Option("Untitled Meeting", "--title", "-t", help="Meeting title."),
+    no_process: bool = typer.Option(
+        False, "--no-process", help="Record only; skip the transcribe step."
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip the remote-upload confirmation prompt."
+    ),
+    config: Optional[str] = ConfigOpt,
+) -> None:
+    """Record mic + system output until stopped, then run the pipeline."""
+    from hearhere.pipeline.orchestrator import process_meeting, record_meeting
+
+    cfg = load_config(config)
+    try:
+        paths = record_meeting(cfg, title)
+    except NotImplementedError as exc:
+        raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
+    typer.echo(f"Recorded meeting: {paths.root}")
+    if no_process:
+        typer.echo(f"Run: hearhere process {paths.root}")
+        return
+    _ensure_remote_consent(cfg, assume_yes=yes)
+    try:
+        meeting = process_meeting(paths.root, cfg, title=title)
+    except Exception as exc:  # noqa: BLE001 - surface remote failures cleanly
+        if cfg.compute.backend != "remote":
+            raise
+        raise typer.Exit(  # type: ignore[func-returns-value]
+            typer.echo(f"Remote processing failed: {exc}", err=True) or 1
+        )
+    typer.echo(f"Processed {len(meeting.transcript.segments)} segment(s) -> {paths.root}")
+
+
+@app.command()
+def process(
+    meeting_dir: Path = typer.Argument(..., help="Path to a recorded meeting folder."),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip the remote-upload confirmation prompt."
+    ),
+    config: Optional[str] = ConfigOpt,
+) -> None:
+    """Run the pipeline on an already-recorded meeting folder."""
+    from hearhere.pipeline.orchestrator import process_meeting
+
+    cfg = load_config(config)
+    _ensure_remote_consent(cfg, assume_yes=yes)
+    try:
+        meeting = process_meeting(meeting_dir, cfg)
+    except FileNotFoundError as exc:
+        raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
+    except Exception as exc:  # noqa: BLE001 - surface remote failures cleanly
+        if cfg.compute.backend != "remote":
+            raise
+        raise typer.Exit(  # type: ignore[func-returns-value]
+            typer.echo(f"Remote processing failed: {exc}", err=True) or 1
+        )
+    typer.echo(
+        f"Transcribed {len(meeting.transcript.segments)} segment(s); "
+        f"speakers: {', '.join(meeting.speakers) or '—'}"
+    )
+
+
+@app.command()
+def export(
+    meeting_dir: Path = typer.Argument(..., help="Path to a processed meeting folder."),
+    format: Optional[str] = typer.Option(
+        None, "--format", "-f", help="Comma-separated formats, e.g. md,srt."
+    ),
+    config: Optional[str] = ConfigOpt,
+) -> None:
+    """Re-export a processed meeting into other formats (from meeting.json)."""
+    from hearhere.export import export_meeting
+
+    cfg = load_config(config)
+    paths = artifacts.resolve_meeting(meeting_dir)
+    try:
+        meeting = artifacts.read_meeting(paths)
+    except FileNotFoundError as exc:
+        raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
+    formats = (
+        [f for f in format.split(",") if f.strip()] if format else cfg.export.formats
+    )
+    written = export_meeting(paths, meeting, formats)
+    typer.echo("Wrote: " + (", ".join(p.name for p in written) or "nothing"))
+
+
+@app.command()
+def speakers(
+    meeting_dir: Path = typer.Argument(..., help="Path to a processed meeting folder."),
+    set_: list[str] = typer.Option(
+        None, "--set", help='Rename a speaker, e.g. --set "Speaker 1=Anna". Repeatable.'
+    ),
+    config: Optional[str] = ConfigOpt,
+) -> None:
+    """Rename speakers after the fact (rewrites meeting.json, re-exports).
+
+    With no ``--set`` given, lists the current speakers.
+    """
+    from hearhere.pipeline.orchestrator import rename_speakers
+
+    cfg = load_config(config)
+    paths = artifacts.resolve_meeting(meeting_dir)
+    try:
+        meeting = artifacts.read_meeting(paths)
+    except FileNotFoundError as exc:
+        raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
+
+    if not set_:
+        typer.echo("Speakers: " + (", ".join(meeting.speakers) or "—"))
+        typer.echo('Rename with: --set "Speaker 1=Anna"')
+        return
+
+    try:
+        mapping = _parse_speaker_map(set_)
+    except ValueError as exc:
+        raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
+
+    updated = rename_speakers(meeting_dir, cfg, mapping)
+    typer.echo("Speakers: " + (", ".join(updated.speakers) or "—"))
+
+
+def _parse_speaker_map(entries: list[str]) -> dict[str, str]:
+    """Parse ``["Speaker 1=Anna", ...]`` into ``{"Speaker 1": "Anna"}``."""
+    mapping: dict[str, str] = {}
+    for entry in entries:
+        old, sep, new = entry.partition("=")
+        old, new = old.strip(), new.strip()
+        if not sep or not old or not new:
+            raise ValueError(f'Invalid --set {entry!r}; expected "Old Name=New Name".')
+        mapping[old] = new
+    return mapping
+
+
+@app.command(name="list")
+def list_meetings(config: Optional[str] = ConfigOpt) -> None:
+    """List past meetings in the configured storage directory."""
+    cfg = load_config(config)
+    meetings = artifacts.list_meetings(cfg.general.storage_dir)
+    if not meetings:
+        typer.echo(f"No meetings found in {cfg.general.storage_dir}")
+        return
+    for m in meetings:
+        typer.echo(m.root.name)
+
+
+@app.command()
+def worker(
+    host: str = typer.Option("0.0.0.0", help="Bind host."),
+    port: int = typer.Option(8808, help="Bind port."),
+    config: Optional[str] = ConfigOpt,
+) -> None:
+    """Run the remote HearHere worker (serves the remote backend)."""
+    cfg = load_config(config)
+    try:
+        from hearhere.remote.worker import run_worker
+    except ModuleNotFoundError as exc:  # missing [remote] extra
+        raise typer.Exit(  # type: ignore[func-returns-value]
+            typer.echo(
+                f"The remote worker needs the '[remote]' extra: {exc}. "
+                'Install with: pip install "hearhere[remote]".',
+                err=True,
+            )
+            or 1
+        )
+    typer.echo(f"HearHere worker listening on {host}:{port}")
+    run_worker(cfg, host=host, port=port)
+
+
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", help="Bind host (loopback by default)."),
+    port: int = typer.Option(8809, help="Bind port."),
+    config: Optional[str] = ConfigOpt,
+) -> None:
+    """Serve the local web UI to browse, rename, and re-export past meetings."""
+    cfg = load_config(config)
+    try:
+        from hearhere.webui.server import run_ui
+    except ModuleNotFoundError as exc:  # missing [webui] extra
+        raise typer.Exit(  # type: ignore[func-returns-value]
+            typer.echo(
+                f"The web UI needs the '[webui]' extra: {exc}. "
+                'Install with: pip install "hearhere[webui]".',
+                err=True,
+            )
+            or 1
+        )
+    typer.echo(f"HearHere web UI on http://{host}:{port} (meetings from {cfg.general.storage_dir})")
+    run_ui(cfg, host=host, port=port)
+
+
+def _ensure_remote_consent(cfg, assume_yes: bool) -> None:
+    """Warn (and confirm before the first upload) when using the remote backend.
+
+    HearHere is local-first; the remote backend uploads audio, so we surface the
+    warning on every remote run and require an explicit confirmation the first
+    time (remembered thereafter). ``--yes`` records consent without prompting.
+    """
+    if cfg.compute.backend != "remote":
+        return
+    from hearhere.remote import consent
+    from hearhere.remote.protocol import upload_warning
+
+    typer.echo(upload_warning(cfg.compute.remote.url), err=True)
+    if consent.has_consent():
+        return
+    if not assume_yes and not typer.confirm(
+        "Continue and upload audio to the remote worker?"
+    ):
+        raise typer.Exit(typer.echo("Aborted; audio not uploaded.", err=True) or 1)  # type: ignore[func-returns-value]
+    consent.record_consent(cfg.compute.remote.url)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    app()

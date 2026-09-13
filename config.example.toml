@@ -1,0 +1,48 @@
+# HearHere configuration.
+# Copy to `config.toml` in your working directory, or to
+# ~/.config/hearhere/config.toml. Values shown are the defaults.
+
+[general]
+language = "auto"          # "auto" | "en" | "de" | any of the 25 supported codes
+storage_dir = "~/HearHere" # where meeting artifacts are written
+
+[compute]
+backend = "local"          # "local" | "remote"
+device  = "auto"           # "auto" | "cpu" | "cuda" | "mps"
+
+[compute.remote]
+url = "https://<your-runpod-host>:8808"
+token = ""                  # bearer token for the worker; or set HEARHERE_REMOTE_TOKEN
+# WARNING: with backend="remote", audio is uploaded to this host. HearHere warns
+# on every remote run and asks for confirmation before the first upload.
+
+[capture]
+# Device selection; "default" uses the OS default devices.
+mic_device    = "default"
+output_device = "default"   # the loopback/monitor/virtual device
+sample_rate   = 16000       # resampled to 16k if the device differs
+
+[asr]
+engine = "parakeet_nemo"    # pluggable
+model  = "nvidia/parakeet-tdt-0.6b-v3"
+timestamps = "segment"      # "segment" | "word" | "char"
+
+[diarization]
+enabled = true
+engine  = "pyannote"        # pluggable
+hf_token = ""               # or set HF_TOKEN env var
+min_speakers = 0            # 0 = auto
+max_speakers = 0            # 0 = auto
+
+[llm]
+enabled = true
+engine  = "ollama"          # "ollama" | "llamacpp"
+model   = "llama3.1"
+tasks   = ["summary", "action_items", "decisions"]
+
+[export]
+formats = ["markdown", "json", "srt"]  # any of: markdown, text, json, srt, vtt
+
+# The local web UI (`hearhere ui`) reads meetings from [general].storage_dir and
+# uses [export].formats as the default export set. It never records or uploads
+# audio. Needs the [webui] extra: pip install "hearhere[webui]".

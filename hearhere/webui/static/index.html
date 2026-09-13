@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HearHere</title>
+  <style>
+    :root {
+      --bg: #f7f7f6; --panel: #ffffff; --ink: #1c1c1a; --muted: #6b6b66;
+      --line: #e3e3df; --accent: #3a6ea5; --me: #2e7d5b; --chip: #eef1f4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #17181a; --panel: #1f2124; --ink: #e9e9e6; --muted: #9a9a94;
+        --line: #2e3033; --accent: #6fa8dc; --me: #6cc39a; --chip: #2a2d31;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 14px/1.5 system-ui, sans-serif; color: var(--ink);
+      background: var(--bg); height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      padding: 12px 20px; border-bottom: 1px solid var(--line);
+      display: flex; align-items: baseline; gap: 10px; background: var(--panel);
+    }
+    header h1 { font-size: 18px; margin: 0; }
+    header .sub { color: var(--muted); font-size: 12px; }
+    main { flex: 1; display: flex; min-height: 0; }
+    #list {
+      width: 300px; border-right: 1px solid var(--line); overflow-y: auto;
+      background: var(--panel);
+    }
+    .item {
+      padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer;
+    }
+    .item:hover { background: var(--chip); }
+    .item.active { background: var(--chip); box-shadow: inset 3px 0 0 var(--accent); }
+    .item .t { font-weight: 600; }
+    .item .m { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    #detail { flex: 1; overflow-y: auto; padding: 24px 28px; }
+    .empty { color: var(--muted); padding: 40px; text-align: center; }
+    h2 { margin: 0 0 4px; }
+    .meta { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+      padding: 16px 18px; margin-bottom: 18px;
+    }
+    .card h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase;
+      letter-spacing: .04em; color: var(--muted); }
+    .seg { display: flex; gap: 12px; padding: 5px 0; align-items: baseline; }
+    .seg .who { flex: 0 0 110px; font-weight: 600; }
+    .seg .who.me { color: var(--me); }
+    .seg .who.other { color: var(--accent); }
+    .seg .time { flex: 0 0 54px; color: var(--muted); font-size: 11px;
+      font-variant-numeric: tabular-nums; text-align: right; }
+    .seg .txt { flex: 1; }
+    ul.clean { margin: 0; padding-left: 18px; }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    .row label { flex: 0 0 110px; }
+    input[type=text] {
+      padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+      background: var(--bg); color: var(--ink); font: inherit;
+    }
+    button {
+      padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+      background: var(--accent); color: #fff; font: inherit; cursor: pointer;
+    }
+    button.ghost { background: transparent; color: var(--ink); }
+    button:disabled { opacity: .5; cursor: default; }
+    .exports a { display: inline-block; margin: 0 10px 6px 0; color: var(--accent); }
+    .fmts { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .fmts label { display: flex; gap: 5px; align-items: center; color: var(--ink); }
+    .toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 6px;
+      opacity: 0; transition: opacity .2s; pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>HearHere</h1>
+    <span class="sub">local meeting review</span>
+  </header>
+  <main>
+    <div id="list"><div class="empty">Loading…</div></div>
+    <div id="detail"><div class="empty">Select a meeting on the left.</div></div>
+  </main>
+  <div class="toast" id="toast"></div>
+
+<script>
+const EXPORT_FORMATS = ["markdown", "text", "json", "srt", "vtt"];
+let meetings = [];
+let current = null;
+
+const el = (t, cls, txt) => { const e = document.createElement(t);
+  if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { detail = (await r.json()).detail || detail; } catch (e) {}
+    throw new Error(`${r.status}: ${detail}`);
+  }
+  return r.status === 204 ? null : r.json();
+}
+
+function fmtTime(s) {
+  if (s == null) return "";
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+async function loadList() {
+  const data = await api("/api/meetings");
+  meetings = data.meetings;
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  if (!meetings.length) { list.appendChild(el("div", "empty", "No meetings yet.")); return; }
+  for (const m of meetings) {
+    const item = el("div", "item");
+    item.dataset.id = m.id;
+    item.appendChild(el("div", "t", m.title));
+    const parts = [m.created_at.slice(0, 10), `${m.segments} segs`,
+      `${m.speakers.length} spk`];
+    if (m.has_summary) parts.push("summary");
+    item.appendChild(el("div", "m", parts.join(" · ")));
+    item.onclick = () => openMeeting(m.id);
+    list.appendChild(item);
+  }
+}
+
+async function openMeeting(id) {
+  document.querySelectorAll(".item").forEach(i =>
+    i.classList.toggle("active", i.dataset.id === id));
+  const detail = document.getElementById("detail");
+  detail.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    current = await api(`/api/meetings/${encodeURIComponent(id)}`);
+    renderDetail();
+  } catch (e) {
+    detail.innerHTML = "";
+    detail.appendChild(el("div", "empty", "Could not load: " + e.message));
+  }
+}
+
+function renderDetail() {
+  const m = current;
+  const d = document.getElementById("detail");
+  d.innerHTML = "";
+  d.appendChild(el("h2", null, m.title));
+  d.appendChild(el("div", "meta",
+    `${m.created_at.slice(0, 16).replace("T", " ")} · ` +
+    `${m.transcript.segments.length} segments · ` +
+    `${m.language || "language auto"}`));
+
+  if (m.summary) d.appendChild(summaryCard(m.summary));
+  d.appendChild(speakersCard(m));
+  d.appendChild(exportCard(m));
+  d.appendChild(transcriptCard(m));
+}
+
+function summaryCard(s) {
+  const c = el("div", "card");
+  c.appendChild(el("h3", null, "Summary"));
+  if (s.summary) c.appendChild(el("p", null, s.summary));
+  const section = (title, items) => {
+    if (!items || !items.length) return;
+    c.appendChild(el("strong", null, title));
+    const ul = el("ul", "clean");
+    items.forEach(x => ul.appendChild(el("li", null, x)));
+    c.appendChild(ul);
+  };
+  section("Decisions", s.decisions);
+  section("Action items", s.action_items);
+  return c;
+}
+
+function speakersCard(m) {
+  const c = el("div", "card");
+  c.appendChild(el("h3", null, "Speakers — rename inline"));
+  const inputs = {};
+  for (const name of m.speakers) {
+    if (name === "Me") continue; // the local user's own channel is fixed
+    const row = el("div", "row");
+    row.appendChild(el("label", null, name));
+    const input = el("input");
+    input.type = "text"; input.value = name; input.placeholder = name;
+    inputs[name] = input;
+    row.appendChild(input);
+    c.appendChild(row);
+  }
+  if (!Object.keys(inputs).length) {
+    c.appendChild(el("div", "meta", "No renameable speakers."));
+    return c;
+  }
+  const btn = el("button", null, "Save names");
+  btn.onclick = async () => {
+    const renames = {};
+    for (const [old, input] of Object.entries(inputs)) {
+      const v = input.value.trim();
+      if (v && v !== old) renames[old] = v;
+    }
+    if (!Object.keys(renames).length) { toast("No changes to save."); return; }
+    btn.disabled = true;
+    try {
+      current = await api(`/api/meetings/${encodeURIComponent(current.id)}/speakers`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ renames }) });
+      renderDetail();
+      await loadList();
+      toast("Speakers renamed and re-exported.");
+    } catch (e) { toast("Rename failed: " + e.message); btn.disabled = false; }
+  };
+  c.appendChild(btn);
+  return c;
+}
+
+function exportCard(m) {
+  const c = el("div", "card");
+  c.appendChild(el("h3", null, "Export"));
+  const fmts = el("div", "fmts");
+  const boxes = {};
+  const chosen = new Set(m.exports.map(f => f.replace(/^transcript\./, "")
+    .replace("md", "markdown").replace("txt", "text")));
+  for (const f of EXPORT_FORMATS) {
+    const label = el("label");
+    const cb = el("input"); cb.type = "checkbox"; cb.value = f;
+    cb.checked = chosen.has(f);
+    boxes[f] = cb;
+    label.appendChild(cb); label.appendChild(document.createTextNode(f));
+    fmts.appendChild(label);
+  }
+  c.appendChild(fmts);
+  const btn = el("button", null, "Re-export");
+  btn.onclick = async () => {
+    const formats = EXPORT_FORMATS.filter(f => boxes[f].checked);
+    if (!formats.length) { toast("Pick at least one format."); return; }
+    btn.disabled = true;
+    try {
+      const r = await api(`/api/meetings/${encodeURIComponent(current.id)}/export`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ formats }) });
+      current = await api(`/api/meetings/${encodeURIComponent(current.id)}`);
+      renderDetail();
+      toast("Wrote: " + (r.written.join(", ") || "nothing"));
+    } catch (e) { toast("Export failed: " + e.message); }
+    btn.disabled = false;
+  };
+  c.appendChild(btn);
+  if (m.exports.length) {
+    const dl = el("div", "exports");
+    dl.style.marginTop = "12px";
+    for (const f of m.exports) {
+      const a = el("a", null, f);
+      a.href = `/api/meetings/${encodeURIComponent(m.id)}/exports/${encodeURIComponent(f)}`;
+      a.target = "_blank";
+      dl.appendChild(a);
+    }
+    c.appendChild(dl);
+  }
+  return c;
+}
+
+function transcriptCard(m) {
+  const c = el("div", "card");
+  c.appendChild(el("h3", null, "Transcript"));
+  if (!m.transcript.segments.length) {
+    c.appendChild(el("div", "meta", "No segments."));
+    return c;
+  }
+  for (const seg of m.transcript.segments) {
+    const row = el("div", "seg");
+    row.appendChild(el("div", "time", fmtTime(seg.start)));
+    const who = el("div", "who " + (seg.speaker === "Me" ? "me" : "other"),
+      seg.speaker || "—");
+    row.appendChild(who);
+    row.appendChild(el("div", "txt", seg.text));
+    c.appendChild(row);
+  }
+  return c;
+}
+
+loadList().catch(e => {
+  document.getElementById("list").innerHTML =
+    `<div class="empty">Could not load meetings: ${e.message}</div>`;
+});
+</script>
+</body>
+</html>

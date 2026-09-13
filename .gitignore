@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Testing / tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local config & meeting artifacts (never commit recordings/transcripts)
+config.toml
+/HearHere/
+*.wav
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
