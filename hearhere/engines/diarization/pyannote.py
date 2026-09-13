@@ -49,13 +49,20 @@ class PyannoteDiarizer:
         """Load (and cache) the pyannote pipeline onto the configured device."""
         if self._pipeline is not None:
             return
+        import inspect  # noqa: PLC0415
+
         import torch  # noqa: PLC0415
         from pyannote.audio import Pipeline  # noqa: PLC0415
 
         log.info("Loading diarization pipeline %s", self.pipeline_name)
+        # pyannote.audio renamed the auth kwarg from ``use_auth_token`` to
+        # ``token`` (aligning with huggingface_hub); pick whichever the
+        # installed version accepts.
+        params = inspect.signature(Pipeline.from_pretrained).parameters
+        token_kwarg = "token" if "token" in params else "use_auth_token"
         pipeline = Pipeline.from_pretrained(
             self.pipeline_name,
-            use_auth_token=self.hf_token or None,
+            **{token_kwarg: self.hf_token or None},
         )
         if pipeline is None:
             raise RuntimeError(
