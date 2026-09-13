@@ -30,11 +30,17 @@ DEFAULT_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 _MIN_DURATION_S = 0.1
 
 # Long audio is transcribed in overlapping chunks: some NeMo builds silently
-# truncate a single long ``transcribe`` call (observed cutting off ~32 s). The
-# chunk length stays under that; the overlap gives each kept segment context on
-# the joining side and lets us tile the windows without gaps or duplicates.
-_CHUNK_SECONDS = 30.0
-_CHUNK_OVERLAP_SECONDS = 5.0
+# truncate a single long ``transcribe`` call (observed cutting off ~32 s of a
+# 46 s clip). Chunks stay comfortably under that so no chunk truncates its own
+# tail; the generous overlap means any segment straddling a cut is transcribed
+# whole inside at least one chunk, and duplicates from the overlap are removed by
+# :func:`_dedup_segments`. This tolerates a chunk dropping its edges, which a
+# hard-seam scheme did not (it left an ~8 s gap at the boundary).
+_CHUNK_SECONDS = 24.0
+_CHUNK_OVERLAP_SECONDS = 6.0
+# Two segments overlapping more than this fraction of the shorter one are treated
+# as the same utterance seen in two chunks.
+_DUP_OVERLAP_RATIO = 0.5
 
 
 def _offset_segment(seg: Segment, dt: float) -> Segment:
@@ -53,28 +59,44 @@ def _offset_segment(seg: Segment, dt: float) -> Segment:
 
 def _chunk_windows(
     total_s: float, chunk_s: float = _CHUNK_SECONDS, overlap_s: float = _CHUNK_OVERLAP_SECONDS
-) -> list[tuple[float, float, float, float]]:
-    """Plan chunk windows as ``(start, end, keep_lo, keep_hi)`` tuples.
+) -> list[tuple[float, float]]:
+    """Plan overlapping ``(start, end)`` capture windows covering ``[0, total_s]``.
 
-    Each window is transcribed over ``[start, end]`` (with overlap for context),
-    but only segments whose (global) start falls in ``[keep_lo, keep_hi)`` are
-    kept, so the kept regions tile ``[0, total_s)`` exactly — no gaps, no
-    duplicates across the seams.
+    Consecutive windows overlap by ``overlap_s`` so no region sits only at a
+    window edge; the caller keeps every segment and de-duplicates afterwards.
     """
     step = max(chunk_s - overlap_s, 1.0)
-    windows: list[tuple[float, float, float, float]] = []
+    windows: list[tuple[float, float]] = []
     start = 0.0
     while True:
         end = min(start + chunk_s, total_s)
-        is_first = not windows
-        is_last = end >= total_s - 1e-9
-        lo = start if is_first else start + overlap_s / 2
-        hi = end if is_last else end - overlap_s / 2
-        windows.append((start, end, lo, hi))
-        if is_last:
+        windows.append((start, end))
+        if end >= total_s - 1e-9:
             break
         start += step
     return windows
+
+
+def _dedup_segments(segments: list[Segment]) -> list[Segment]:
+    """Sort by time and drop near-duplicates from overlapping chunks.
+
+    Two segments that overlap by more than ``_DUP_OVERLAP_RATIO`` of the shorter
+    one are the same utterance seen in two chunks; keep the longer (more complete)
+    one. Segments that merely abut or briefly touch are both kept, so no audio is
+    dropped at a seam.
+    """
+    kept: list[Segment] = []
+    for seg in sorted(segments, key=lambda s: (s.start, s.end)):
+        if kept:
+            prev = kept[-1]
+            overlap = min(prev.end, seg.end) - max(prev.start, seg.start)
+            shorter = min(prev.end - prev.start, seg.end - seg.start) or 1e-9
+            if overlap / shorter > _DUP_OVERLAP_RATIO:
+                if (seg.end - seg.start) > (prev.end - prev.start):
+                    kept[-1] = seg  # replace the partial copy with the fuller one
+                continue
+        kept.append(seg)
+    return kept
 
 
 def _wav_duration_seconds(wav_path: str) -> float | None:
@@ -177,14 +199,12 @@ class ParakeetNeMoEngine:
             "Transcribing %s in %d chunk(s) of ~%.0fs (%.1fs total)",
             wav_path, len(windows), _CHUNK_SECONDS, duration,
         )
-        merged: list[Segment] = []
-        for start, end, lo, hi in windows:
+        collected: list[Segment] = []
+        for start, end in windows:
             samples = audio[int(start * sr):int(end * sr)]
             for seg in self._transcribe_samples(samples, sr, want_words=want_words):
-                g_start = seg.start + start
-                if lo <= g_start < hi:
-                    merged.append(_offset_segment(seg, start))
-        return merged
+                collected.append(_offset_segment(seg, start))
+        return _dedup_segments(collected)
 
     def _transcribe_samples(
         self, samples: Any, sr: int, *, want_words: bool
