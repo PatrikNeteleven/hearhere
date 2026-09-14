@@ -10,13 +10,13 @@ No cloud. No accounts. No audio ever leaves your machine (unless you *explicitly
 
 Powered by NVIDIA's [**parakeet-tdt-0.6b-v3**](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) multilingual speech-to-text model.
 
-> **Status:** Working. Recording is **Windows-only** today — macOS and Linux
-> capture are the remaining gaps; everything else (processing, diarization,
-> summaries, exports, the web UI, the remote worker) is cross-platform. The
-> Windows record → transcribe path is fully implemented but has not yet been
-> exercised against real audio hardware and the real models, so expect the odd
-> rough edge on a first run — [INSTRUCTIONS.md](INSTRUCTIONS.md#troubleshooting)
-> covers the likely ones.
+> **Status:** Working. The Windows record → transcribe path has been exercised
+> end to end on real audio hardware on two machines. Recording is
+> **Windows-only** today — macOS and Linux capture are the remaining gaps;
+> everything else (processing, diarization, summaries, exports, the web UI, the
+> remote worker) is cross-platform.
+> [INSTRUCTIONS.md](INSTRUCTIONS.md#troubleshooting) covers the rough edges that
+> did turn up, mostly around audio-device selection.
 
 ---
 
@@ -39,6 +39,7 @@ Powered by NVIDIA's [**parakeet-tdt-0.6b-v3**](https://huggingface.co/nvidia/par
 - [Privacy](#privacy)
 - [Requirements](#requirements)
 - [Known constraints](#known-constraints)
+- [Contributing](#contributing)
 - [License & attribution](#license--attribution)
 
 ---
@@ -494,6 +495,16 @@ See [TODO.md](TODO.md) for the detailed breakdown.
 - **WSL2 has no direct audio** — not a runtime target.
 - **pyannote needs a one-time online step** (accept terms + token) to download weights; it runs locally afterward.
 - **Diarization is imperfect**, especially with heavy cross-talk on the output channel; speaker labels are editable.
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
+the dev setup (`pip install -e ".[remote,webui,dev]"` runs the whole test suite
+without downloading a single model), the project conventions, and what a good PR
+looks like. The biggest open items are **macOS and Linux capture** — see
+[TODO.md](TODO.md).
 
 ---
 

@@ -16,10 +16,10 @@ This assumes you've just done `git clone` on a Windows machine and have nothing
 else set up. Do the steps in order. Every command is run in **PowerShell**
 (press Start, type "PowerShell", open it).
 
-> **Heads-up:** the Windows record → transcribe path is fully written but has not
-> yet been exercised on real audio hardware or with the real models. Expect to
-> hit the odd rough edge on first run; the [Troubleshooting](#troubleshooting)
-> section covers the likely ones.
+> **Heads-up:** the Windows record → transcribe path has been run end to end on
+> real audio hardware on two machines. Most first-run friction is audio-device
+> selection (pro/USB interfaces especially) — the
+> [Troubleshooting](#troubleshooting) section covers what turned up.
 
 ### Step 1 — Install Python 3.12
 
