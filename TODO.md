@@ -79,8 +79,8 @@ Legend: 🎯 milestone · ⛓️ depends on the batch above · 🧪 has an expli
 ## Batch 6 — Additional engines & formats *(optional, parallelizable)*
 
 - [ ] `engines/llm/llamacpp.py` (GGUF via llama.cpp) as an Ollama alternative.
-- [ ] Export: WebVTT (`vtt`).
-- [ ] Language auto-detect wiring + per-meeting language override.
+- [x] Export: WebVTT (`vtt`).
+- [x] Language auto-detect wiring + per-meeting language override (`--language`, `[general].language`).
 - [ ] Engine registry so config names resolve to implementations cleanly.
 
 ---
@@ -96,11 +96,11 @@ Legend: 🎯 milestone · ⛓️ depends on the batch above · 🧪 has an expli
 
 ## Cross-cutting (do alongside, not a blocking batch)
 
-- [ ] Tests per batch (unit for merge/align/config/export; smoke tests for capture where feasible).
+- [x] Tests per batch (unit for merge/align/config/export; smoke tests for capture where feasible). *(116 tests, no network or model downloads.)*
 - [ ] Error handling: missing devices, no model, no GPU, Ollama/pyannote unavailable. *(Partly done: capture now fails loudly with an actionable `CaptureError` when a channel's recorder crashes, and ASR skips empty/near-silent WAVs instead of crashing NeMo — found on real Windows hardware 2026-09-13.)*
 - [x] **Long-audio transcription.** A single NeMo `transcribe` call truncated long audio (cut off ~32 s of a 46 s clip on real hardware 2026-09-13). Fixed: audio longer than `_CHUNK_SECONDS` (24 s) is transcribed in overlapping 24 s windows (6 s overlap), kept in full, and de-duplicated (`_dedup_segments` drops copies overlapping >50 % of the shorter, keeping the fuller one). Chunks stay well under the ~32 s truncation point so none truncates its own tail, and the overlap means any utterance straddling a cut is transcribed whole in at least one chunk — a first hard-seam scheme (30 s/5 s) left an ~8 s hole at the boundary when a chunk dropped its tail, since fixed. Segment + word timestamps are offset onto the global timeline; ASR logs a coverage warning if the transcript still ends >3 s before the audio. Window/dedup/offset logic unit-tested (incl. a no-gap-across-seam case); the NeMo call path still needs a real-hardware re-run to confirm full, gap-free coverage.
 - [x] **Robust Windows capture backend.** `soundcard`'s WASAPI shared-mode capture asserted on some devices' mix format (`wFormatTag == 0xFFFE`) and failed on pro/USB interfaces like the Focusrite Scarlett (hit on real hardware 2026-09-13). Done: (a) mic is now captured via `sounddevice`/PortAudio (already a `[capture]` dep); soundcard is used only for system-output loopback (PortAudio can't do loopback, soundcard can't be swapped out for it). (b) Each channel records at its device's **native sample rate** and is downmixed + resampled to 16 kHz on write. (c) New `hearhere devices` command lists input names (`[capture].mic_device`) and output names (`[capture].output_device`). ⚠️ Written but **not yet verified on a real Windows box** — sounddevice's `InputStream` callback path and the Scarlett specifically are unexercised here (WSL2 has no audio); the pure param-selection logic (`_mic_stream_params`) and error paths are unit-tested.
-- [ ] Choose & add HearHere's own license file (README marks it TBD).
-- [ ] CI: lint + tests on push.
+- [x] Choose & add HearHere's own license file — **MIT**, see `LICENSE`.
+- [x] CI: tests on push/PR via GitHub Actions (`.github/workflows/tests.yml`, Python 3.10–3.13). *(Lint not wired up yet.)*
 - [ ] Packaging/distribution story per OS (later).
 - [ ] Recording-consent notice surfaced in `record` output (privacy/legal).

@@ -1,12 +1,22 @@
 # HearHere
 
+[![tests](https://github.com/julianjocham/hearhere/actions/workflows/tests.yml/badge.svg)](https://github.com/julianjocham/hearhere/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python 3.12 recommended](https://img.shields.io/badge/python-3.12%20recommended-blue.svg)](https://www.python.org/downloads/)
+
 **A fully local meeting transcriber.** HearHere listens to *both sides* of a meeting on your machine — your microphone (you) and the system audio output (everyone else) — and turns the whole conversation into an accurate, speaker-attributed transcript, with an optional local-LLM summary and action items.
 
 No cloud. No accounts. No audio ever leaves your machine (unless you *explicitly* opt into a remote GPU backend — see [Compute backends](#compute-backends)).
 
 Powered by NVIDIA's [**parakeet-tdt-0.6b-v3**](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) multilingual speech-to-text model.
 
-> **Status:** Design / pre-implementation. This README is the implementation spec. Nothing here is built yet.
+> **Status:** Working. Recording is **Windows-only** today — macOS and Linux
+> capture are the remaining gaps; everything else (processing, diarization,
+> summaries, exports, the web UI, the remote worker) is cross-platform. The
+> Windows record → transcribe path is fully implemented but has not yet been
+> exercised against real audio hardware and the real models, so expect the odd
+> rough edge on a first run — [INSTRUCTIONS.md](INSTRUCTIONS.md#troubleshooting)
+> covers the likely ones.
 
 ---
 
@@ -53,7 +63,7 @@ HearHere is designed around three real deployment scenarios (in order of expecte
 | 2 | **Rented remote GPU** (e.g. a RunPod machine reachable over API) | Remote HTTP backend | ⚠️ No — audio is sent to your remote box |
 | 3 | **Workstation with an NVIDIA GPU** | Local CUDA | ✅ Yes |
 
-Scenario 2 is a **speed fallback** for when a laptop is too slow and no local GPU exists. It is explicitly *not* fully local and the app must warn the user before any audio leaves the machine.
+Scenario 2 is a **speed fallback** for when a laptop is too slow and no local GPU exists. It is explicitly *not* fully local: HearHere warns on every remote run and asks for confirmation before the first upload.
 
 ---
 
@@ -113,7 +123,7 @@ The heavy work (ASR, diarization, LLM) runs behind a **compute backend** abstrac
 | **Local MPS** *(experimental)* | `mps` | Apple Silicon GPU via Metal. Support depends on NeMo/PyTorch MPS coverage; may fall back to CPU per-op. | ✅ |
 | **Remote API** | `remote` | Sends audio to a remote HearHere worker (e.g. on RunPod) over HTTP and gets results back (Scenario 2). | ⚠️ No |
 
-**Selection logic (recommended default):** prefer `cuda` if a compatible NVIDIA GPU is present, else `cpu`. Never auto-select `remote` — it must be an explicit, warned choice.
+**Selection logic:** `auto` prefers `cuda` if a compatible NVIDIA GPU is present, else `cpu`. `remote` is never auto-selected — it is always an explicit, warned choice.
 
 The remote backend runs the *same* HearHere pipeline in "worker mode" on the remote machine and exposes a small HTTP API; the local app becomes a thin client that uploads the two WAV files and downloads the transcript/summary artifacts.
 
@@ -146,14 +156,14 @@ All adapters must output the format Parakeet requires: **16 kHz, mono, WAV/PCM**
 
 ## Tech stack
 
-- **Language:** Python 3.10+
+- **Language:** Python 3.10+ (**3.12 recommended** — see [Requirements](#requirements))
 - **ASR:** NVIDIA NeMo (`nemo_toolkit[asr]`) running `nvidia/parakeet-tdt-0.6b-v3`
 - **Diarization:** pyannote.audio (pluggable)
-- **Local LLM:** Ollama by default (pluggable; llama.cpp/GGUF as an alternative)
+- **Local LLM:** Ollama (pluggable; a llama.cpp/GGUF backend is planned)
 - **Audio I/O:** `sounddevice` / `soundcard` / `soundfile`, with per-OS adapters
-- **CLI:** `typer` or `click`
+- **CLI:** `typer`
 - **Config:** TOML (`pydantic`-validated)
-- **Optional local web UI (Phase 2):** FastAPI backend + lightweight browser frontend for browsing/reviewing/exporting past meetings
+- **Local web UI:** FastAPI backend + a single-page browser frontend for browsing, reviewing, renaming speakers, and re-exporting past meetings (`hearhere ui`)
 
 > **Model requirements (from the model card):** input must be **16 kHz mono WAV/FLAC**; the model provides char/word/segment timestamps; long-form supported (up to ~24 min full-attention on big GPUs, ~3 h with local attention); minimum ~2 GB RAM to load; license **CC-BY-4.0**.
 
@@ -164,43 +174,56 @@ All adapters must output the format Parakeet requires: **16 kHz, mono, WAV/PCM**
 ```
 hearhere/
 ├── README.md
+├── INSTRUCTIONS.md            # step-by-step install & run guide
+├── TODO.md                    # roadmap / remaining work
+├── LICENSE
 ├── pyproject.toml
+├── config.example.toml
+├── .github/workflows/tests.yml
 ├── hearhere/
-│   ├── __init__.py
-│   ├── cli.py                 # entry point (record / transcribe / process / export)
+│   ├── cli.py                 # record / process / export / speakers / list / devices / worker / ui
 │   ├── config.py              # TOML config + pydantic schema, defaults
+│   ├── models.py              # Segment / Transcript / Meeting / Summary data models
+│   ├── compute.py             # device resolution (auto / cpu / cuda / mps)
+│   ├── extras.py              # optional-dependency detection + actionable errors
+│   ├── logging_setup.py       # per-meeting hearhere.log
 │   ├── capture/
-│   │   ├── base.py            # AudioCapture interface
-│   │   ├── windows.py         # WASAPI loopback
-│   │   ├── macos.py           # BlackHole / virtual device
-│   │   └── linux.py           # PipeWire/PulseAudio monitor
+│   │   ├── base.py            # AudioCapture interface + platform dispatch
+│   │   └── windows.py         # WASAPI loopback (mic via sounddevice, output via soundcard)
 │   ├── engines/
 │   │   ├── asr/
-│   │   │   ├── base.py        # ASREngine interface
+│   │   │   ├── base.py        # ASREngine interface + registry
 │   │   │   ├── parakeet_nemo.py
-│   │   │   └── remote.py      # remote backend client
+│   │   │   └── remote.py      # remote-backend client
 │   │   ├── diarization/
-│   │   │   ├── base.py        # DiarizationEngine interface
+│   │   │   ├── base.py        # DiarizationEngine interface + registry
 │   │   │   └── pyannote.py
 │   │   └── llm/
-│   │       ├── base.py        # SummarizerEngine interface
-│   │       ├── ollama.py
-│   │       └── llamacpp.py
+│   │       ├── base.py        # SummarizerEngine interface + registry
+│   │       └── ollama.py
 │   ├── pipeline/
-│   │   ├── orchestrator.py    # ties stages together
+│   │   ├── orchestrator.py    # ties the stages together
 │   │   ├── merge.py           # time-align + merge self/others segments
-│   │   └── artifacts.py       # meeting artifact layout on disk
+│   │   └── artifacts.py       # meeting folder layout on disk
 │   ├── export/
 │   │   ├── markdown.py
 │   │   ├── text.py
 │   │   ├── json.py
-│   │   └── subtitles.py       # SRT / WebVTT
+│   │   ├── subtitles.py       # SRT / WebVTT
+│   │   ├── summary.py         # summary.md
+│   │   └── timefmt.py         # timestamp formatting
 │   ├── llm/
 │   │   └── prompts.py         # summary / action-item prompt templates
-│   └── remote/
-│       └── worker.py          # FastAPI worker for the remote backend
-├── config.example.toml
-└── tests/
+│   ├── remote/
+│   │   ├── protocol.py        # request/response models shared by client & worker
+│   │   ├── client.py          # thin local client
+│   │   ├── consent.py         # "audio is leaving your machine" gate
+│   │   └── worker.py          # FastAPI worker (bearer-token gated)
+│   └── webui/
+│       ├── server.py          # FastAPI app (binds loopback by default)
+│       ├── service.py         # listing / speaker rename / re-export
+│       └── static/index.html  # single-page frontend
+└── tests/                     # 116 tests; no network, no model downloads
 ```
 
 ---
@@ -211,14 +234,14 @@ hearhere/
 > including Windows specifics, GPU/CUDA notes, and first-time model setup.
 
 ### 1. Prerequisites
-- Python 3.10+
+- Python 3.10+ — **3.12 is the recommended version**; it's what HearHere is developed and tested against, and some ML dependencies still lag on 3.13
 - (Optional) NVIDIA GPU with CUDA for Scenario 3
 - (Optional) [Ollama](https://ollama.com) installed and running, for local summaries
 - (macOS only) A virtual audio device such as [BlackHole](https://github.com/ExistentialAudio/BlackHole)
 
 ### 2. Install HearHere
 ```bash
-git clone <repo-url> hearhere
+git clone https://github.com/julianjocham/hearhere.git
 cd hearhere
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
@@ -271,8 +294,10 @@ backend = "local"          # "local" | "remote"
 device  = "auto"           # "auto" | "cpu" | "cuda" | "mps"
 
 [compute.remote]
-url = "https://<your-runpod-host>:8808"
-# WARNING: with backend="remote", audio is uploaded to this host.
+url   = "https://<your-runpod-host>:8808"
+token = ""                  # bearer token for the worker; or set HEARHERE_REMOTE_TOKEN
+# WARNING: with backend="remote", audio is uploaded to this host. HearHere warns
+# on every remote run and asks for confirmation before the first upload.
 
 [capture]
 # Device selection; "default" uses the OS default devices.
@@ -293,8 +318,9 @@ min_speakers = 0            # 0 = auto
 max_speakers = 0            # 0 = auto
 
 [llm]
-enabled = true
-engine  = "ollama"          # "ollama" | "llamacpp"
+enabled = false             # OFF by default — transcription only. Set true (and
+                            # run Ollama) to also generate a summary.
+engine  = "ollama"          # "llamacpp" is accepted but not yet implemented
 model   = "llama3.1"
 tasks   = ["summary", "action_items", "decisions"]
 
@@ -306,29 +332,47 @@ formats = ["markdown", "json", "srt"]  # any of: markdown, text, json, srt, vtt
 
 ## Usage
 
-CLI-first. (A local web UI for reviewing past meetings is a Phase 2 add-on.)
+Eight commands. `hearhere --help` lists them all; every command takes
+`--config/-c` to point at a specific `config.toml`.
 
 ```bash
-# Record a meeting — captures mic + system output until you stop (Ctrl+C or `q`).
+# Record a meeting — captures mic + system output until you press Enter,
+# then runs the full pipeline automatically.
 hearhere record --title "Weekly Sync"
 
-# Recording produces a meeting folder with self.wav + others.wav, then
-# by default runs the full pipeline automatically. To split the steps:
+# Pin the language (auto-detection can flip mid-clip); "auto" to detect.
+hearhere record --title "Weekly Sync" --language de
+
+# Record only; transcribe later.
+hearhere record --title "Weekly Sync" --no-process
 
 # Transcribe/process an already-recorded meeting folder:
 hearhere process ~/HearHere/2026-09-13_weekly-sync/
 
-# Re-export an already-processed meeting into other formats:
-hearhere export ~/HearHere/2026-09-13_weekly-sync/ --format md,srt
+# Re-export an already-processed meeting into other formats (never re-runs models):
+hearhere export ~/HearHere/2026-09-13_weekly-sync/ --format md,srt,vtt
 
 # Rename speakers after the fact:
 hearhere speakers ~/HearHere/2026-09-13_weekly-sync/ --set "Speaker 1=Anna" --set "Speaker 2=Ben"
 
 # List past meetings:
 hearhere list
+
+# List capture devices, to pin [capture].mic_device / output_device in config:
+hearhere devices
+
+# Browse, review, rename speakers, and re-export in the browser (loopback only):
+hearhere ui                       # http://127.0.0.1:8809
+
+# On a remote GPU box — serve the remote backend:
+hearhere worker --host 0.0.0.0 --port 8808
 ```
 
-Typical flow: `hearhere record` → talk → stop → transcript + summary land in the meeting folder.
+`record` and `process` also take `--yes/-y` to skip the remote-upload
+confirmation prompt when `backend = "remote"`.
+
+Typical flow: `hearhere record` → talk → press Enter → transcript (and summary,
+if the LLM is enabled) land in the meeting folder.
 
 ---
 
@@ -401,32 +445,40 @@ class SummarizerEngine(Protocol):
         """Return summary / decisions / action items."""
 ```
 
-Shipping implementations: `parakeet_nemo` + `remote` (ASR), `pyannote` (diarization), `ollama` + `llamacpp` (LLM). Add your own by implementing the interface and registering it under a config name.
+Shipping implementations: `parakeet_nemo` + `remote` (ASR), `pyannote` (diarization), `ollama` (LLM). A `llamacpp` LLM backend is registered in config but not yet implemented. Add your own by implementing the interface and registering it under a config name.
 
 ---
 
 ## Roadmap
 
-- **Phase 1 — Core (Windows).** WASAPI capture, Parakeet ASR (CPU + CUDA), merge, Markdown/JSON/SRT export, CLI.
-- **Phase 2 — Speakers & summaries.** pyannote diarization, speaker renaming, Ollama summaries.
-- **Phase 3 — macOS.** BlackHole capture + setup docs; MPS device support.
-- **Phase 4 — Linux.** PipeWire/PulseAudio monitor capture.
-- **Phase 5 — Remote backend.** FastAPI worker + remote client for RunPod (Scenario 2), with clear "leaving your machine" warnings.
-- **Phase 6 — Local web UI.** Browse, review, rename speakers, and export past meetings in the browser.
+**Done:**
+
+- ✅ **Core (Windows).** WASAPI capture, Parakeet ASR (CPU + CUDA), merge, Markdown/text/JSON/SRT/VTT export, CLI.
+- ✅ **Speakers & summaries.** pyannote diarization, speaker renaming, Ollama summaries.
+- ✅ **Remote backend.** FastAPI worker + remote client for a rented GPU (Scenario 2), token-gated, with explicit "leaving your machine" consent.
+- ✅ **Local web UI.** Browse, review, rename speakers, and re-export past meetings in the browser.
+
+**Remaining:**
+
+- ⬜ **macOS capture.** BlackHole / virtual-device capture + setup docs; MPS device support.
+- ⬜ **Linux capture.** PipeWire/PulseAudio monitor capture.
+- ⬜ **llama.cpp/GGUF summarizer** as an Ollama-free LLM backend.
+
+See [TODO.md](TODO.md) for the detailed breakdown.
 
 ---
 
 ## Privacy
 
 - By default, **100% on-device**: audio, transcripts, and summaries never leave your machine.
-- The **only** exception is `backend = "remote"`, which uploads audio to a host *you* configure. The app must warn before the first remote upload.
+- The **only** exception is `backend = "remote"`, which uploads audio to a host *you* configure. HearHere warns on every remote run and requires confirmation before the first upload (`--yes/-y` to skip the prompt).
 - Recording other people may be subject to laws and workplace policies requiring consent. **HearHere does not obtain consent for you** — that's your responsibility.
 
 ---
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10+ — **3.12 recommended.** The test suite runs on 3.10–3.13 in CI, but the heavy ML extras (NeMo, PyTorch) are only verified on 3.12
 - ~2 GB RAM minimum to load the ASR model (more recommended)
 - CPU works everywhere; NVIDIA GPU (Ampere/Hopper/Blackwell/Volta class) strongly recommended for speed
 - (macOS) a virtual audio device (BlackHole) for output capture

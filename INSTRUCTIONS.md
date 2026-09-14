@@ -3,8 +3,8 @@
 How to install and run HearHere on each operating system.
 
 > **Platform status.** Recording currently works on **Windows only** — it's the
-> priority-1 platform. macOS and Linux capture are not implemented yet (they
-> arrive in Batches 3 and 4; see [`TODO.md`](TODO.md)). Everything *except*
+> priority-1 platform. macOS and Linux capture are not implemented yet (see
+> [`TODO.md`](TODO.md) for what's planned). Everything *except*
 > recording — processing an existing recording, the web UI, exports, and the
 > remote backend — is cross-platform today.
 
@@ -21,11 +21,13 @@ else set up. Do the steps in order. Every command is run in **PowerShell**
 > hit the odd rough edge on first run; the [Troubleshooting](#troubleshooting)
 > section covers the likely ones.
 
-### Step 1 — Install Python 3.10+
+### Step 1 — Install Python 3.12
 
 1. Download the installer from
-   [python.org/downloads](https://www.python.org/downloads/) (3.10, 3.11, or
-   3.12 — **not** 3.13 yet, some ML deps lag behind).
+   [python.org/downloads](https://www.python.org/downloads/). **Use 3.12** —
+   it's the version HearHere is developed and tested against, and the one the
+   ML dependencies (NeMo, PyTorch) are known to work on. 3.10 and 3.11 should
+   also work; avoid 3.13 for now, some ML deps still lag behind.
 2. Run it and **tick "Add python.exe to PATH"** on the first screen before
    clicking Install. This is the most common thing people miss.
 3. Close and reopen PowerShell, then confirm:
@@ -34,7 +36,7 @@ else set up. Do the steps in order. Every command is run in **PowerShell**
    python --version
    ```
 
-   You should see `Python 3.1x.x`. If you get "Python was not found" or the
+   You should see `Python 3.12.x`. If you get "Python was not found" or the
    Microsoft Store opens, PATH wasn't set — re-run the installer and tick the box.
 
 ### Step 2 — Go into the repo folder
@@ -255,8 +257,9 @@ hearhere ui
 
 ## macOS (recording not yet supported)
 
-Recording on macOS arrives in **Batch 3** (via BlackHole / a virtual output
-device). Until then, `hearhere record` will tell you it's not implemented.
+Recording on macOS is **not implemented yet** — it will arrive via BlackHole or
+a similar virtual output device. Until then, `hearhere record` tells you so
+instead of failing obscurely.
 
 What already works on macOS today:
 
@@ -278,8 +281,9 @@ pip install ".[asr,diarization,llm,webui]"
 
 ## Linux (recording not yet supported)
 
-Recording on Linux arrives in **Batch 4** (via a PipeWire/PulseAudio `.monitor`
-source). Until then, `hearhere record` will tell you it's not implemented.
+Recording on Linux is **not implemented yet** — it will arrive via a
+PipeWire/PulseAudio `.monitor` source. Until then, `hearhere record` tells you
+so instead of failing obscurely.
 
 > **WSL2 note:** WSL2 has no direct audio access — you can't record from it even
 > once Linux capture lands. Record on the host OS.
@@ -356,7 +360,7 @@ the finished meeting back; exports still happen locally.
   the model still downloads. To silence it, enable Windows *Developer Mode*
   (Settings → Privacy & security → For developers) so the cache can use symlinks.
 - **`'record' is not implemented` on macOS/Linux** — expected; recording is
-  Windows-only for now (Batches 3/4 add the rest).
+  Windows-only for now. Everything else works on those platforms.
 - **`The web UI needs the '[webui]' extra`** — run `pip install ".[webui]"`.
 - **Diarization is skipped** — set a Hugging Face token (`HF_TOKEN`) and accept
   the pyannote model license; the pipeline fails soft and continues unlabeled.

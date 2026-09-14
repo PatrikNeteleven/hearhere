@@ -37,7 +37,7 @@ max_speakers = 0            # 0 = auto
 [llm]
 enabled = false             # OFF by default — transcription only. Set true (and
                             # run Ollama) to also generate a summary.
-engine  = "ollama"          # "ollama" | "llamacpp"
+engine  = "ollama"          # "llamacpp" is accepted but not yet implemented
 model   = "llama3.1"
 tasks   = ["summary", "action_items", "decisions"]
 

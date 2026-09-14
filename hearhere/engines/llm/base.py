@@ -56,5 +56,5 @@ def create_summarizer_engine(config: "Config") -> SummarizerEngine:
 
         return OllamaSummarizer(model=config.llm.model, tasks=list(config.llm.tasks))
     if name == "llamacpp":
-        raise NotImplementedError("The llama.cpp summarizer arrives in Batch 6.")
+        raise NotImplementedError("The llama.cpp summarizer is not implemented yet.")
     raise ValueError(f"Unknown LLM engine {name!r}.")

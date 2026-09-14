@@ -156,11 +156,13 @@ def create_audio_capture(
         return WindowsCapture(self_wav, others_wav, **kwargs)
     if platform == "darwin":
         raise NotImplementedError(
-            "macOS capture arrives in Batch 3 (BlackHole / virtual device)."
+            "macOS audio capture is not implemented yet "
+            "(it will use BlackHole or a similar virtual device)."
         )
     if platform.startswith("linux"):
         raise NotImplementedError(
-            "Linux capture arrives in Batch 4 (PipeWire/PulseAudio monitor). "
+            "Linux audio capture is not implemented yet "
+            "(it will use a PipeWire/PulseAudio monitor source). "
             "Note: WSL2 has no direct audio access — record on the host OS."
         )
     raise NotImplementedError(f"No audio capture adapter for platform {platform!r}.")
