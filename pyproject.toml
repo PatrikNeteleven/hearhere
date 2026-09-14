@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "A fully local, dual-channel meeting transcriber (mic + system output) with speaker attribution and local-LLM summaries."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "TBD" }
+license = { text = "MIT" }
 authors = [{ name = "HearHere contributors" }]
 keywords = ["transcription", "asr", "diarization", "meetings", "local", "parakeet"]
 
@@ -58,7 +58,7 @@ dev = [
 hearhere = "hearhere.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/your-org/hearhere"
+Homepage = "https://github.com/julianjocham/hearhere"
 
 [tool.setuptools.packages.find]
 include = ["hearhere*"]

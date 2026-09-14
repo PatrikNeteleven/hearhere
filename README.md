@@ -447,7 +447,7 @@ Shipping implementations: `parakeet_nemo` + `remote` (ASR), `pyannote` (diarizat
 
 ## License & attribution
 
-- HearHere: *TBD* (add a license file).
+- HearHere: **MIT** — see [LICENSE](LICENSE).
 - **Model:** `nvidia/parakeet-tdt-0.6b-v3` is licensed **CC-BY-4.0**. Attribute NVIDIA when you distribute transcripts or derivatives as required by that license.
 - Diarization via **pyannote.audio** and any LLM you plug in carry their own licenses — check them for your use.
 
