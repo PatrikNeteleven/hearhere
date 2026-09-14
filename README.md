@@ -207,7 +207,8 @@ hearhere/
 
 ## Installation
 
-> These are the *intended* install steps for implementation. Adjust once the package exists.
+> A short version. [INSTRUCTIONS.md](INSTRUCTIONS.md) is the step-by-step guide,
+> including Windows specifics, GPU/CUDA notes, and first-time model setup.
 
 ### 1. Prerequisites
 - Python 3.10+
@@ -220,8 +221,27 @@ hearhere/
 git clone <repo-url> hearhere
 cd hearhere
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e .
+
+# Minimum to record and get a transcript:
+pip install -e ".[capture,asr]"
+
+# Or everything — speaker names, summaries, and the browser UI:
+pip install -e ".[capture,asr,diarization,llm,webui]"
 ```
+
+**Pick your extras.** Only `typer`/`pydantic` are hard dependencies — audio
+capture, ASR, diarization, and summaries each live behind an extra and are
+imported lazily, so a bare `pip install -e .` gives you a CLI that fails at the
+first real recording or model load with a "needs the `[…]` extra" message.
+
+| Extra | Pulls in | Needed for |
+| --- | --- | --- |
+| `capture` | sounddevice, soundcard, numpy, soundfile | `hearhere record` |
+| `asr` | NeMo, PyTorch | transcription (Parakeet) |
+| `diarization` | pyannote.audio, PyTorch | speaker attribution |
+| `llm` | ollama client | `summary.md` |
+| `webui` | FastAPI, uvicorn | `hearhere ui` |
+| `remote` | FastAPI, uvicorn, httpx | `hearhere worker` / remote backend |
 
 ### 3. First-time model setup
 - **Parakeet** downloads automatically on first run via NeMo.

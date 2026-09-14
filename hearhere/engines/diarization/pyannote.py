@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...extras import require
 from ...logging_setup import get_logger
 from ...models import SpeakerTurn
 
@@ -51,8 +52,9 @@ class PyannoteDiarizer:
             return
         import inspect  # noqa: PLC0415
 
-        import torch  # noqa: PLC0415
-        from pyannote.audio import Pipeline  # noqa: PLC0415
+        with require("diarization", "Speaker diarization"):
+            import torch  # noqa: PLC0415
+            from pyannote.audio import Pipeline  # noqa: PLC0415
 
         log.info("Loading diarization pipeline %s", self.pipeline_name)
         # pyannote.audio renamed the auth kwarg from ``use_auth_token`` to

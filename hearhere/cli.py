@@ -15,6 +15,7 @@ import typer
 
 from hearhere import __version__
 from hearhere.config import load_config
+from hearhere.extras import MissingExtraError
 from hearhere.logging_setup import get_logger, setup_logging
 from hearhere.pipeline import artifacts
 
@@ -95,7 +96,7 @@ def record(
     cfg = _with_language(load_config(config), language)
     try:
         paths = record_meeting(cfg, title)
-    except (NotImplementedError, CaptureError) as exc:
+    except (NotImplementedError, CaptureError, MissingExtraError) as exc:
         raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
     typer.echo(f"Recorded meeting: {paths.root}")
     if no_process:
@@ -104,6 +105,10 @@ def record(
     _ensure_remote_consent(cfg, assume_yes=yes)
     try:
         meeting = process_meeting(paths.root, cfg, title=title)
+    except MissingExtraError as exc:
+        typer.echo(f"Recorded, but not processed. {exc}", err=True)
+        typer.echo(f"Once installed, run: hearhere process {paths.root}", err=True)
+        raise typer.Exit(1)
     except Exception as exc:  # noqa: BLE001 - surface remote failures cleanly
         if cfg.compute.backend != "remote":
             raise
@@ -129,7 +134,7 @@ def process(
     _ensure_remote_consent(cfg, assume_yes=yes)
     try:
         meeting = process_meeting(meeting_dir, cfg)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, MissingExtraError) as exc:
         raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
     except Exception as exc:  # noqa: BLE001 - surface remote failures cleanly
         if cfg.compute.backend != "remote":

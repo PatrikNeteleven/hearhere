@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...llm.prompts import build_prompt
+from ...extras import require
 from ...logging_setup import get_logger
 from ...models import Summary
 
@@ -54,7 +55,8 @@ class OllamaSummarizer:
         self.tasks = list(tasks) if tasks else list(DEFAULT_TASKS)
 
     def _client(self) -> Any:
-        import ollama  # noqa: PLC0415
+        with require("llm", "Summarization"):
+            import ollama  # noqa: PLC0415
 
         return ollama.Client(host=self.host) if self.host else ollama
 

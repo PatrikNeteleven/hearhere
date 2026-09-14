@@ -23,6 +23,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from ..extras import require
 from ..logging_setup import get_logger
 from .base import (
     TARGET_SAMPLE_RATE,
@@ -78,7 +79,8 @@ class WindowsCapture(AudioCapture):
 
     def _resolve_loopback(self) -> Any:
         """The default speaker as a loopback 'microphone'."""
-        import soundcard as sc  # noqa: PLC0415
+        with require("capture", "Recording"):
+            import soundcard as sc  # noqa: PLC0415
 
         if self.output_device == "default":
             speaker = sc.default_speaker()
@@ -91,7 +93,8 @@ class WindowsCapture(AudioCapture):
 
     def _start_mic_stream(self) -> Any:
         """Open and start the mic InputStream via sounddevice (raises on failure)."""
-        import sounddevice as sd  # noqa: PLC0415
+        with require("capture", "Recording"):
+            import sounddevice as sd  # noqa: PLC0415
 
         device = None if self.mic_device == "default" else self.mic_device
         try:

@@ -19,6 +19,7 @@ import wave
 from pathlib import Path
 from typing import Any
 
+from ...extras import require
 from ...logging_setup import get_logger
 from ...models import Segment, Word
 
@@ -136,7 +137,8 @@ class ParakeetNeMoEngine:
         """Load (and cache) the NeMo model onto the configured device."""
         if self._model is not None:
             return
-        import nemo.collections.asr as nemo_asr  # noqa: PLC0415
+        with require("asr", "Transcription"):
+            import nemo.collections.asr as nemo_asr  # noqa: PLC0415
 
         log.info("Loading ASR model %s onto %s", self.model_name, self.device)
         model = nemo_asr.models.ASRModel.from_pretrained(model_name=self.model_name)
