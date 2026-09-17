@@ -11,6 +11,7 @@ from __future__ import annotations
 import wave
 
 from hearhere.capture.base import CaptureError
+from hearhere.capture.linux import LinuxCapture
 from hearhere.capture.windows import WindowsCapture, _mic_stream_params
 from hearhere.engines.asr.parakeet_nemo import (
     ParakeetNeMoEngine,
@@ -72,6 +73,51 @@ def test_capture_error_generic_for_other_failures(tmp_path):
     msg = str(cap._capture_error())
     assert "system-output" in msg
     assert "device busy" in msg
+
+
+# --- Linux capture fails loudly instead of writing an empty WAV ------------
+
+
+def test_linux_capture_raises_actionable_error_on_mic_failure(tmp_path):
+    cap = LinuxCapture(tmp_path / "self.wav", tmp_path / "others.wav")
+    cap._errors["self"] = RuntimeError("no default source")
+    err = cap._capture_error()
+    assert isinstance(err, CaptureError)
+    msg = str(err)
+    assert "microphone" in msg
+    assert "mic_device" in msg  # points the user at the fix
+
+
+def test_linux_capture_error_names_monitor_for_output_failure(tmp_path):
+    cap = LinuxCapture(tmp_path / "self.wav", tmp_path / "others.wav")
+    cap._errors["others"] = RuntimeError("no monitor source")
+    msg = str(cap._capture_error())
+    assert "sink monitor" in msg
+    assert "output_device" in msg
+    assert "no monitor source" in msg
+
+
+def test_linux_capture_stop_without_start_writes_empty_wavs(tmp_path):
+    # No frames captured and no errors -> two empty (0-frame) 16 kHz mono WAVs,
+    # rather than a crash. Mirrors a recording that captured pure silence.
+    # stop() resamples + writes, so it needs the [capture] extra (numpy/soundfile);
+    # skip on the light CI install that has neither.
+    import pytest  # noqa: PLC0415
+
+    pytest.importorskip("numpy")
+    pytest.importorskip("soundfile")
+
+    self_wav = tmp_path / "self.wav"
+    others_wav = tmp_path / "others.wav"
+    cap = LinuxCapture(self_wav, others_wav)
+    result = cap.stop()
+    assert result.self_wav == self_wav
+    assert result.others_wav == others_wav
+    for path in (self_wav, others_wav):
+        with wave.open(str(path), "rb") as wf:
+            assert wf.getnchannels() == 1
+            assert wf.getframerate() == 16000
+            assert wf.getnframes() == 0
 
 
 # --- mic stream parameter selection (sounddevice) --------------------------

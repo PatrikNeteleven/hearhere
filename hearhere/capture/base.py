@@ -160,9 +160,7 @@ def create_audio_capture(
             "(it will use BlackHole or a similar virtual device)."
         )
     if platform.startswith("linux"):
-        raise NotImplementedError(
-            "Linux audio capture is not implemented yet "
-            "(it will use a PipeWire/PulseAudio monitor source). "
-            "Note: WSL2 has no direct audio access — record on the host OS."
-        )
+        from .linux import LinuxCapture  # noqa: PLC0415
+
+        return LinuxCapture(self_wav, others_wav, **kwargs)
     raise NotImplementedError(f"No audio capture adapter for platform {platform!r}.")

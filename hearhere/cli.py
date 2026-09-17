@@ -8,6 +8,7 @@ the local web UI for reviewing past meetings in the browser (Batch 7).
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -235,9 +236,40 @@ def list_meetings(config: Optional[str] = ConfigOpt) -> None:
 def devices(config: Optional[str] = ConfigOpt) -> None:
     """List audio devices for [capture].mic_device / output_device.
 
-    Inputs are listed via sounddevice (the mic backend); system-output devices
-    via soundcard (the loopback backend). Copy a name into config.toml.
+    The backend depends on the OS: on Linux both channels go through soundcard
+    (PulseAudio/PipeWire), so inputs and outputs are both listed from it; on
+    Windows the mic is listed via sounddevice and outputs via soundcard. Copy a
+    name into config.toml.
     """
+    if sys.platform.startswith("linux"):
+        _devices_linux()
+    else:
+        _devices_default()
+
+
+def _devices_linux() -> None:
+    """List soundcard (PulseAudio/PipeWire) sources and sinks — the Linux backend."""
+    typer.echo("Microphone inputs (for [capture].mic_device):")
+    try:
+        import soundcard as sc  # noqa: PLC0415
+
+        for mic in sc.all_microphones(include_loopback=False):
+            typer.echo(f"  {mic.name}")
+    except Exception as exc:  # noqa: BLE001 - report, don't crash
+        typer.echo(f"  (unavailable: {exc}; install 'hearhere[capture]')", err=True)
+
+    typer.echo("System-output devices (for [capture].output_device):")
+    try:
+        import soundcard as sc  # noqa: PLC0415
+
+        for speaker in sc.all_speakers():
+            typer.echo(f"  {speaker.name}")
+    except Exception as exc:  # noqa: BLE001 - report, don't crash
+        typer.echo(f"  (unavailable: {exc}; install 'hearhere[capture]')", err=True)
+
+
+def _devices_default() -> None:
+    """List sounddevice inputs + soundcard outputs — the Windows/macOS backend."""
     typer.echo("Microphone inputs (for [capture].mic_device):")
     try:
         import sounddevice as sd  # noqa: PLC0415
