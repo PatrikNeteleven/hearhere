@@ -35,7 +35,14 @@ class CaptureError(RuntimeError):
     Raised loudly so the caller never mistakes a failed capture for a silent
     meeting — an empty WAV would otherwise crash the ASR stage with a cryptic
     error much later.
+
+    ``meeting_dir`` is set when the failure surfaced *after* the adapter had
+    already written what it captured — a one-channel failure still leaves the
+    healthy channel on disk — so the caller can point the user at the
+    salvageable recording instead of telling them to start over.
     """
+
+    meeting_dir: Path | None = None
 
 
 @dataclass(frozen=True)

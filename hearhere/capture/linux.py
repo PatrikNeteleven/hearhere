@@ -48,6 +48,9 @@ log = get_logger("capture.linux")
 
 # Frames pulled per read; a small block keeps stop() responsive.
 _BLOCKSIZE = 1024
+# [capture].mic_device value meaning "this machine has no microphone": record
+# the system-output channel alone instead of refusing to record at all.
+NO_MIC = "none"
 # How long stop() waits for a capture thread to drain before giving up on it. A
 # yanked USB device can wedge soundcard's read loop without ever failing, and we
 # must not block the user's Enter/Ctrl-C — and lose the recording — forever.
@@ -65,6 +68,22 @@ def _device_label(device: Any) -> str:
         return device.name
     except Exception:  # noqa: BLE001 - name lookup is best-effort in error paths
         return getattr(device, "id", None) or repr(device)
+
+
+def _is_monitor(device: Any) -> bool:
+    """Whether a soundcard device is a sink's loopback monitor, not a real input.
+
+    ``_Microphone.isloopback`` reads PulseAudio's ``device.class`` proplist,
+    which some pipewire-pulse / Bluetooth / virtual sinks never set — so a
+    correctly resolved monitor can report ``False``. Fall back to PulseAudio's
+    naming rule (every sink's monitor source is ``<sink id>.monitor``), which
+    holds whenever we resolved the device by that exact id.
+    """
+    try:
+        loopback = bool(device.isloopback)
+    except Exception:  # noqa: BLE001 - the property does a live PA round trip
+        loopback = False
+    return loopback or str(getattr(device, "id", "") or "").endswith(".monitor")
 
 
 def _verify_requested(requested: str, device: Any, kind: str) -> None:
@@ -117,7 +136,23 @@ class LinuxCapture(AudioCapture):
             import soundcard as sc  # noqa: PLC0415
 
         if self.mic_device == "default":
-            return sc.default_microphone()
+            mic = sc.default_microphone()
+            # default_microphone() resolves with include_loopback=True, so on a
+            # box whose default source is a monitor (PipeWire with no physical
+            # input, or right after a Bluetooth switch) this hands back system
+            # output — and both channels would record the same audio. The
+            # converse of the others.wav guard below.
+            if _is_monitor(mic):
+                raise CaptureError(
+                    f"The default input source ({_device_label(mic)!r}) is a "
+                    "loopback monitor of system output, not a microphone — "
+                    "recording it as self.wav would duplicate others.wav. Set "
+                    "[capture].mic_device in config.toml (run `hearhere devices` "
+                    'for names), or select a real input in your sound settings. '
+                    'On a box with no capture hardware at all, set mic_device = '
+                    '"none" to record system output only.'
+                )
+            return mic
         mic = sc.get_microphone(self.mic_device, include_loopback=False)
         _verify_requested(self.mic_device, mic, "microphone")
         return mic
@@ -139,7 +174,7 @@ class LinuxCapture(AudioCapture):
         # the real mic source that shares the description verbatim — silently
         # recording the microphone into others.wav. The exact-id lookup can't.
         mic = sc.get_microphone(speaker.id + ".monitor", include_loopback=True)
-        if not mic.isloopback:
+        if not _is_monitor(mic):
             raise CaptureError(
                 f"Resolved {_device_label(mic)!r} as the system-output monitor, "
                 "but it is not a loopback source — refusing to record the "
@@ -162,58 +197,110 @@ class LinuxCapture(AudioCapture):
             return resolve()
         except (MissingExtraError, CaptureError):
             raise  # already actionable
-        except BaseException as exc:  # noqa: BLE001 - translated to CaptureError
-            self._errors[channel] = exc
+        except Exception as exc:  # noqa: BLE001 - translated to CaptureError
+            # Deliberately not BaseException: a Ctrl-C while soundcard
+            # enumerates the PulseAudio graph should abort, not come back as
+            # "recording failed (KeyboardInterrupt: )".
+            # Deliberately NOT recorded in self._errors: that dict means "a
+            # recording died mid-flight" and drives _capture_error(); a later
+            # stop() would otherwise overwrite the meeting with empty WAVs and
+            # blame a recording that never started.
             log.error("Could not resolve %s device: %s", channel, exc)
-            raise self._capture_error() from exc
+            raise self._resolve_error(channel, exc) from exc
 
     # -- recording -------------------------------------------------------
 
-    def _record(self, channel: str, device: Any, sink: list["np.ndarray"]) -> None:
-        """soundcard capture loop for one channel, run on a background thread."""
+    def _record(
+        self,
+        channel: str,
+        device: Any,
+        sink: list["np.ndarray"],
+        stop: threading.Event,
+        errors: dict[str, BaseException],
+    ) -> None:
+        """soundcard capture loop for one channel, run on a background thread.
+
+        Takes its stop event, frame list and error dict as arguments rather than
+        reading ``self``: stop() may abandon a wedged thread, and a run's state
+        must stay reachable only by that run's threads.
+        """
         try:
             with device.recorder(
                 samplerate=self.sample_rate, blocksize=_BLOCKSIZE
             ) as rec:
-                while not self._stop.is_set():
+                while not stop.is_set():
                     sink.append(rec.record(numframes=_BLOCKSIZE))
         except BaseException as exc:  # noqa: BLE001 - reported from stop()
             # Record the error for stop() to surface, but do NOT stop the other
             # channel: a mic failure must not silently kill an otherwise-healthy
             # system-output recording while the user still thinks both are going.
-            self._errors[channel] = exc
+            errors[channel] = exc
             log.error(
                 "Capture failed on %s channel (%s): %s",
                 channel, _device_label(device), exc,
             )
 
     def start(self) -> None:
-        self._stop.clear()
-        self._errors.clear()
-        self._mic_frames.clear()
-        self._out_frames.clear()
-        self._t0 = time.monotonic()
+        # Fresh per-run state, rebound rather than cleared in place. stop() can
+        # give up on a wedged capture thread, and that thread keeps a reference
+        # to whatever it was handed; giving each run its own event, lists and
+        # error dict means an orphan can never resume into the next recording
+        # (start() would otherwise clear the shared stop event and restart its
+        # loop) nor interleave its audio into the next WAV.
+        self._stop = threading.Event()
+        self._errors = {}
+        self._mic_frames = []
+        self._out_frames = []
+        # Cleared here as well as set below: if resolution fails, a later stop()
+        # must not report the time since the *previous* recording began.
+        self._t0 = 0.0
+        stop, errors = self._stop, self._errors
+        mic_frames, out_frames = self._mic_frames, self._out_frames
 
         # Resolve both devices up front so a bad device name (or missing
         # PulseAudio) fails fast, before the user thinks they're recording — and
         # as a CaptureError, not a raw traceback.
-        mic = self._resolve("self", self._resolve_mic)
+        # "none" is for machines with no capture hardware (HDMI-only desktops,
+        # VMs, headless boxes): record system output alone rather than refuse,
+        # leaving an empty self.wav that the ASR stage already skips.
+        mic = None if self.mic_device == NO_MIC else self._resolve("self", self._resolve_mic)
         monitor = self._resolve("others", self._resolve_monitor)
-        log.info("Recording mic=%s @ %d Hz via soundcard", mic.name, self.sample_rate)
+        # _device_label, not .name: the latter is a live source_info() round
+        # trip that raises if the device vanishes between resolve and log —
+        # the raw traceback _resolve() exists to prevent.
+        if mic is None:
+            log.warning(
+                'mic_device is "%s": recording system output only, self.wav '
+                "will be empty.", NO_MIC,
+            )
+        else:
+            log.info(
+                "Recording mic=%s @ %d Hz via soundcard",
+                _device_label(mic), self.sample_rate,
+            )
         log.info(
-            "Recording monitor=%s @ %d Hz via soundcard", monitor.name, self.sample_rate
+            "Recording monitor=%s @ %d Hz via soundcard",
+            _device_label(monitor), self.sample_rate,
         )
 
         self._threads = [
             threading.Thread(
-                target=self._record, args=("self", mic, self._mic_frames), daemon=True
-            ),
-            threading.Thread(
                 target=self._record,
-                args=("others", monitor, self._out_frames),
+                args=("others", monitor, out_frames, stop, errors),
                 daemon=True,
-            ),
+            )
         ]
+        if mic is not None:
+            self._threads.insert(
+                0,
+                threading.Thread(
+                    target=self._record,
+                    args=("self", mic, mic_frames, stop, errors),
+                    daemon=True,
+                ),
+            )
+        # Only now that both devices opened cleanly does the clock start.
+        self._t0 = time.monotonic()
         for t in self._threads:
             t.start()
 
@@ -222,9 +309,10 @@ class LinuxCapture(AudioCapture):
         for t in self._threads:
             t.join(timeout=_STOP_JOIN_TIMEOUT)
             if t.is_alive():
-                # soundcard's read loop can wedge on a yanked device without ever
-                # raising; don't block on it forever. It's a daemon thread and
-                # won't append once its backing device is gone, so proceed with
+                # soundcard's read loop can wedge on a stalled device without
+                # ever raising; don't block on it forever. It's a daemon thread
+                # writing into this run's own list and stop event, so whatever
+                # it does next cannot reach the next recording — proceed with
                 # what we've already captured.
                 log.warning(
                     "Capture thread %s did not stop within %.0fs; "
@@ -248,8 +336,10 @@ class LinuxCapture(AudioCapture):
             if self._out_frames
             else np.zeros((0, 1), dtype=np.float32)
         )
-        self._mic_frames.clear()
-        self._out_frames.clear()
+        # Rebind rather than clear in place: a thread abandoned above still
+        # holds the old lists, and an in-place clear would race with it.
+        self._mic_frames = []
+        self._out_frames = []
 
         # Persist whatever each channel captured BEFORE surfacing any error, so a
         # failure on one channel never discards a healthy channel's audio — the
@@ -274,6 +364,24 @@ class LinuxCapture(AudioCapture):
         )
         return CaptureResult(
             self_wav=self.self_wav, others_wav=self.others_wav, duration=self._duration
+        )
+
+    def _resolve_error(self, channel: str, exc: BaseException) -> CaptureError:
+        """Build an actionable error for a device that could not be opened.
+
+        A different failure from _capture_error's: most of these are
+        environmental (no libpulse, no PipeWire/PulseAudio session), where
+        "pick a different device" is advice that cannot possibly help and
+        hides the actual fix.
+        """
+        device = "microphone" if channel == "self" else "system-output (sink monitor)"
+        return CaptureError(
+            f"Could not open the {device} device ({type(exc).__name__}: {exc}). "
+            "Check that a PipeWire/PulseAudio session is running and that the "
+            "system libpulse library is installed (Debian/Ubuntu: `apt install "
+            "libpulse0`); on a headless box start pipewire-pulse or pulseaudio "
+            "first. Then run `hearhere devices` to list names, or set "
+            "[capture].mic_device / [capture].output_device in config.toml."
         )
 
     def _capture_error(self) -> CaptureError:

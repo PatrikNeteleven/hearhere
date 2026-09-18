@@ -98,7 +98,12 @@ def record(
     try:
         paths = record_meeting(cfg, title)
     except (NotImplementedError, CaptureError, MissingExtraError) as exc:
-        raise typer.Exit(typer.echo(str(exc), err=True) or 1)  # type: ignore[func-returns-value]
+        typer.echo(str(exc), err=True)
+        partial = getattr(exc, "meeting_dir", None)
+        if partial is not None:
+            typer.echo(f"Partial recording kept in: {partial}", err=True)
+            typer.echo(f"To salvage it, run: hearhere process {partial}", err=True)
+        raise typer.Exit(1)
     typer.echo(f"Recorded meeting: {paths.root}")
     if no_process:
         typer.echo(f"Run: hearhere process {paths.root}")
@@ -255,6 +260,7 @@ def _devices_linux() -> None:
 
         for mic in sc.all_microphones(include_loopback=False):
             typer.echo(f"  {mic.name}")
+        typer.echo('  (none listed? set mic_device = "none" for output-only)')
     except Exception as exc:  # noqa: BLE001 - report, don't crash
         typer.echo(f"  (unavailable: {exc}; install 'hearhere[capture]')", err=True)
 
