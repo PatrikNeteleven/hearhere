@@ -149,7 +149,7 @@ Capturing **system output** ("what you hear") is OS-specific and is the only gen
 - **Mic:** the default (or configured) PulseAudio/PipeWire source.
 - **System output:** the `.monitor` source of the default (or configured) sink — native loopback of exactly what you hear, no virtual cable and no extra software.
 - **Backend:** both channels go through [`soundcard`](https://github.com/bastibe/SoundCard), which talks to PulseAudio/PipeWire (`pipewire-pulse`) directly and enumerates each sink's monitor as a loopback source. Unlike Windows there's no need to split the mic onto `sounddevice` — PulseAudio has no WASAPI-style format pitfalls, and `sounddevice` on Linux binds to raw ALSA `hw:` devices, bypassing PipeWire and its defaults.
-- **Requirements:** a running PipeWire (or PulseAudio) session and the system `libportaudio2` package (`sudo apt install libportaudio2`); then `pip install "hearhere[capture]"`. Run `hearhere devices` to list source and sink names for `[capture].mic_device` / `output_device`.
+- **Requirements:** a running PipeWire (or PulseAudio) session and the system `libpulse0` package (`sudo apt install libpulse0`) — `soundcard` talks to PulseAudio directly and does not use PortAudio here; then `pip install "hearhere[capture]"`. Run `hearhere devices` to list source and sink names for `[capture].mic_device` / `output_device`.
 
 > **WSL2 note:** WSL2 has no direct audio device access by default. HearHere on WSL2 would need audio bridged from the Windows host (or run on the Windows side natively). Treat WSL2 as a dev environment, not a target.
 

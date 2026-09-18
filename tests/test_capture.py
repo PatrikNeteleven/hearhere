@@ -11,7 +11,11 @@ from __future__ import annotations
 import wave
 
 from hearhere.capture.base import CaptureError
-from hearhere.capture.linux import LinuxCapture
+from hearhere.capture.linux import (
+    LinuxCapture,
+    _device_label,
+    _verify_requested,
+)
 from hearhere.capture.windows import WindowsCapture, _mic_stream_params
 from hearhere.engines.asr.parakeet_nemo import (
     ParakeetNeMoEngine,
@@ -113,11 +117,62 @@ def test_linux_capture_stop_without_start_writes_empty_wavs(tmp_path):
     result = cap.stop()
     assert result.self_wav == self_wav
     assert result.others_wav == others_wav
+    # Never started, so duration is 0.0 — not the machine's uptime (_t0 == 0.0).
+    assert result.duration == 0.0
     for path in (self_wav, others_wav):
         with wave.open(str(path), "rb") as wf:
             assert wf.getnchannels() == 1
             assert wf.getframerate() == 16000
             assert wf.getnframes() == 0
+
+
+# --- Linux device resolution guards ----------------------------------------
+
+
+class _FakeDevice:
+    """Stand-in for a soundcard _Microphone/_Speaker.
+
+    ``name`` optionally raises to mimic a device that has disappeared (a live
+    source_info() round trip that IndexErrors).
+    """
+
+    def __init__(self, *, name=None, id=None, name_raises=False):
+        self._name = name
+        self.id = id
+        self._name_raises = name_raises
+
+    @property
+    def name(self):
+        if self._name_raises:
+            raise IndexError("no soundcard with id")
+        return self._name
+
+
+def test_verify_requested_accepts_substring_match():
+    dev = _FakeDevice(name="Jabra Evolve 65 Analog Stereo", id="alsa_input.jabra")
+    # A legitimate substring/exact match must not raise.
+    _verify_requested("Jabra", dev, "microphone")
+    _verify_requested("alsa_input.jabra", dev, "microphone")
+
+
+def test_verify_requested_rejects_fuzzy_match():
+    # soundcard's fuzzy fallback would resolve "Xyz" to this arbitrary device;
+    # the requested string appears in neither name nor id, so we fail fast.
+    dev = _FakeDevice(name="Built-in Audio Analog Stereo", id="alsa_output.pci")
+    try:
+        _verify_requested("Xyz", dev, "microphone")
+    except CaptureError as err:
+        assert "No microphone matches" in str(err)
+        assert "hearhere devices" in str(err)
+    else:  # pragma: no cover - the guard must raise
+        raise AssertionError("expected CaptureError for a fuzzy-only match")
+
+
+def test_device_label_falls_back_to_id_when_name_round_trip_fails():
+    # The error path logs device.name, which IndexErrors once the device is gone;
+    # _device_label must not itself throw, so the diagnostic log survives.
+    gone = _FakeDevice(id="alsa_input.usb-gone", name_raises=True)
+    assert _device_label(gone) == "alsa_input.usb-gone"
 
 
 # --- mic stream parameter selection (sounddevice) --------------------------
